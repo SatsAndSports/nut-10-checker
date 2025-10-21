@@ -183,25 +183,38 @@ pub struct MintQuoteResult {
 #[wasm_bindgen]
 pub async fn create_mint_quote(
     mint_url: String,
+    seed_words: String,
     amount_sat: u64,
 ) -> Result<JsValue, JsValue> {
     let url: MintUrl = mint_url.parse()
         .map_err(|e| JsValue::from_str(&format!("Invalid mint URL: {:?}", e)))?;
 
-    let http_client = HttpClient::new(url);
+    let mnemonic = Mnemonic::parse(&seed_words)
+        .map_err(|e| JsValue::from_str(&format!("Invalid seed: {:?}", e)))?;
 
-    let quote = http_client.post_mint_quote(
-        cdk::nuts::MintQuoteBolt11Request {
-            amount: Amount::from(amount_sat),
-            unit: CurrencyUnit::Sat,
-            description: Some("NUT-10 Checker test".to_string()),
-            pubkey: None,
-        }
-    ).await
+    let seed = mnemonic.to_seed("");
+
+    // Create unique storage key for this mint
+    let storage_key = format!("wallet_{}", url.to_string().replace("://", "_").replace("/", "_"));
+    let store = Arc::new(LocalStorageWalletDatabase::new(&storage_key).await?);
+
+    let http_client = HttpClient::new(url.clone());
+
+    let wallet = WalletBuilder::new()
+        .mint_url(url)
+        .unit(CurrencyUnit::Sat)
+        .localstore(store)
+        .seed(seed)
+        .client(http_client)
+        .build()
+        .map_err(|e| JsValue::from_str(&format!("Failed to build wallet: {:?}", e)))?;
+
+    // Create quote through wallet (saves to localstore)
+    let quote = wallet.mint_quote(Amount::from(amount_sat), Some("NUT-10 Checker".to_string())).await
         .map_err(|e| JsValue::from_str(&format!("Failed to create quote: {:?}", e)))?;
 
     let result = MintQuoteResult {
-        quote_id: quote.quote.clone(),
+        quote_id: quote.id.clone(),
         request: quote.request.clone(),
         paid: false,  // Will be checked by polling
     };
@@ -213,32 +226,34 @@ pub async fn create_mint_quote(
 #[wasm_bindgen]
 pub async fn check_mint_quote_status(
     mint_url: String,
+    seed_words: String,
     quote_id: String,
 ) -> Result<bool, JsValue> {
     let url: MintUrl = mint_url.parse()
         .map_err(|e| JsValue::from_str(&format!("Invalid mint URL: {:?}", e)))?;
 
-    let http_client = HttpClient::new(url);
+    let mnemonic = Mnemonic::parse(&seed_words)
+        .map_err(|e| JsValue::from_str(&format!("Invalid seed: {:?}", e)))?;
 
-    match http_client.get_mint_quote_status(&quote_id).await {
-        Ok(status) => {
-            // Check if state indicates payment
-            Ok(matches!(status.state, cdk::nuts::MintQuoteState::Paid | cdk::nuts::MintQuoteState::Issued))
-        },
-        Err(e) => {
-            // Some mints return the quote data in error details
-            let err_str = format!("{:?}", e);
-            web_sys::console::log_1(&format!("Error string: {}", err_str).into());
+    let seed = mnemonic.to_seed("");
 
-            // Check for escaped quotes (from Debug format) or regular quotes
-            if err_str.contains("\\\"paid\\\":true") || err_str.contains("\"paid\":true") ||
-               err_str.contains("\\\"state\\\":\\\"PAID\\\"") || err_str.contains("\"state\":\"PAID\"") {
-                web_sys::console::log_1(&"Found paid indicator in error!".into());
-                Ok(true)
-            } else {
-                web_sys::console::log_1(&"No paid indicator found".into());
-                Err(JsValue::from_str(&format!("Failed to check quote status: {:?}", e)))
-            }
-        }
-    }
+    // Create unique storage key for this mint
+    let storage_key = format!("wallet_{}", url.to_string().replace("://", "_").replace("/", "_"));
+    let store = Arc::new(LocalStorageWalletDatabase::new(&storage_key).await?);
+
+    let http_client = HttpClient::new(url.clone());
+
+    let wallet = WalletBuilder::new()
+        .mint_url(url)
+        .unit(CurrencyUnit::Sat)
+        .localstore(store)
+        .seed(seed)
+        .client(http_client)
+        .build()
+        .map_err(|e| JsValue::from_str(&format!("Failed to build wallet: {:?}", e)))?;
+
+    let response = wallet.mint_quote_state(&quote_id).await
+        .map_err(|e| JsValue::from_str(&format!("Failed to check quote status: {:?}", e)))?;
+
+    Ok(matches!(response.state, cdk::nuts::MintQuoteState::Paid | cdk::nuts::MintQuoteState::Issued))
 }

@@ -259,7 +259,7 @@
 
             try {
                 // Create mint quote (amount needs to be BigInt)
-                const quote = await create_mint_quote(mint.url, BigInt(amount));
+                const quote = await create_mint_quote(mint.url, mint.info.seed, BigInt(amount));
                 console.log('Mint quote created:', quote);
 
                 // Show invoice dialog
@@ -392,11 +392,18 @@
             const maxAttempts = 60; // 5 minutes (60 * 5 seconds)
             let attempts = 0;
 
+            // Get the seed for this mint
+            const mint = await getMint(mintUrl);
+            if (!mint || !mint.info.seed) {
+                statusText.textContent = '❌ Error: wallet not initialized';
+                return;
+            }
+
             const interval = setInterval(async () => {
                 attempts++;
 
                 try {
-                    const paid = await check_mint_quote_status(mintUrl, quoteId);
+                    const paid = await check_mint_quote_status(mintUrl, mint.info.seed, quoteId);
 
                     if (paid) {
                         clearInterval(interval);
@@ -406,14 +413,8 @@
                         statusText.textContent = '⏱️ Payment timeout. Please try again.';
                     }
                 } catch (err) {
-                    // Check if error message contains payment success indicators
-                    const errStr = err.toString();
-                    if (errStr.includes('"paid":true') || errStr.includes('"state":"PAID"')) {
-                        clearInterval(interval);
-                        await handlePaymentSuccess(mintUrl, quoteId, statusText);
-                    } else {
-                        console.error('Error checking payment status:', err);
-                    }
+                    console.error('Error checking payment status:', err);
+                    // Continue polling - might be a temporary network issue
                 }
             }, 5000); // Check every 5 seconds
         }
