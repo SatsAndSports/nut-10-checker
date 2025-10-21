@@ -30,7 +30,7 @@
             </div>
             <div class="mint-controls">
                 <input type="number" id="mint-amount" placeholder="Amount (sat)" value="100" min="1">
-                <button id="mint-tokens-btn">Mint Test Tokens</button>
+                <button id="mint-tokens-btn">Mint Tokens</button>
             </div>
         </section>
 
@@ -242,7 +242,12 @@
         async function mintTokens() {
             const mint = await getActiveMint();
             if (!mint) {
-                alert('Please add a mint first');
+                alert('Please add a mint and set it as active first');
+                return;
+            }
+
+            if (!mint.isActive) {
+                alert('Please select an active mint first by clicking "Set Active"');
                 return;
             }
 
