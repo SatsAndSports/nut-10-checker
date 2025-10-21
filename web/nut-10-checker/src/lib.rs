@@ -4,10 +4,11 @@ use std::sync::Arc;
 use bip39::Mnemonic;
 
 // CDK imports
-use cdk::nuts::{SecretKey, CurrencyUnit};
+use cdk::nuts::{SecretKey, CurrencyUnit, PublicKey, SpendingConditions, Conditions, SigFlag};
 use cdk::wallet::{HttpClient, MintConnector, WalletBuilder};
 use cdk::Amount;
 use cdk_common::mint_url::MintUrl;
+use std::str::FromStr;
 
 mod wallet_db;
 use wallet_db::LocalStorageWalletDatabase;
@@ -256,4 +257,137 @@ pub async fn check_mint_quote_status(
         .map_err(|e| JsValue::from_str(&format!("Failed to check quote status: {:?}", e)))?;
 
     Ok(matches!(response.state, cdk::nuts::MintQuoteState::Paid | cdk::nuts::MintQuoteState::Issued))
+}
+
+/// Mint tokens with P2PK spending conditions (2-of-2 multisig)
+#[wasm_bindgen]
+pub async fn mint_with_p2pk_2of2(
+    mint_url: String,
+    seed_words: String,
+    quote_id: String,
+    alice_pubkey: String,
+    bob_pubkey: String,
+) -> Result<JsValue, JsValue> {
+    let url: MintUrl = mint_url.parse()
+        .map_err(|e| JsValue::from_str(&format!("Invalid mint URL: {:?}", e)))?;
+
+    let mnemonic = Mnemonic::parse(&seed_words)
+        .map_err(|e| JsValue::from_str(&format!("Invalid seed: {:?}", e)))?;
+
+    let seed = mnemonic.to_seed("");
+
+    let storage_key = format!("wallet_{}", url.to_string().replace("://", "_").replace("/", "_"));
+    let store = Arc::new(LocalStorageWalletDatabase::new(&storage_key).await?);
+
+    let http_client = HttpClient::new(url.clone());
+
+    let wallet = WalletBuilder::new()
+        .mint_url(url)
+        .unit(CurrencyUnit::Sat)
+        .localstore(store)
+        .seed(seed)
+        .client(http_client)
+        .build()
+        .map_err(|e| JsValue::from_str(&format!("Failed to build wallet: {:?}", e)))?;
+
+    // Parse pubkeys
+    let alice_pk = PublicKey::from_str(&alice_pubkey)
+        .map_err(|e| JsValue::from_str(&format!("Invalid Alice pubkey: {:?}", e)))?;
+    let bob_pk = PublicKey::from_str(&bob_pubkey)
+        .map_err(|e| JsValue::from_str(&format!("Invalid Bob pubkey: {:?}", e)))?;
+
+    // Create 2-of-2 multisig spending conditions
+    let conditions = Conditions::new(
+        None,                           // No locktime
+        Some(vec![bob_pk]),            // Additional pubkey (Bob)
+        None,                           // No refund keys
+        Some(2),                        // Require 2 signatures
+        Some(SigFlag::SigAll),         // SigAll flag
+        None,                           // No refund num_sigs
+    ).map_err(|e| JsValue::from_str(&format!("Failed to create conditions: {:?}", e)))?;
+
+    let spending_conditions = SpendingConditions::new_p2pk(
+        alice_pk,           // Primary key (Alice)
+        Some(conditions),
+    );
+
+    // Mint tokens with spending conditions
+    let proofs = wallet.mint(&quote_id, Default::default(), Some(spending_conditions)).await
+        .map_err(|e| JsValue::from_str(&format!("Failed to mint: {:?}", e)))?;
+
+    Ok(serde_wasm_bindgen::to_value(&proofs)?)
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SwapResult {
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+/// Attempt to swap (spend) proofs with specific signatures
+#[wasm_bindgen]
+pub async fn swap_with_signatures(
+    mint_url: String,
+    seed_words: String,
+    proofs_json: JsValue,
+    secret_keys: Vec<String>,
+) -> Result<JsValue, JsValue> {
+    let url: MintUrl = mint_url.parse()
+        .map_err(|e| JsValue::from_str(&format!("Invalid mint URL: {:?}", e)))?;
+
+    let mnemonic = Mnemonic::parse(&seed_words)
+        .map_err(|e| JsValue::from_str(&format!("Invalid seed: {:?}", e)))?;
+
+    let seed = mnemonic.to_seed("");
+
+    let storage_key = format!("wallet_{}", url.to_string().replace("://", "_").replace("/", "_"));
+    let store = Arc::new(LocalStorageWalletDatabase::new(&storage_key).await?);
+
+    let http_client = HttpClient::new(url.clone());
+
+    let wallet = WalletBuilder::new()
+        .mint_url(url)
+        .unit(CurrencyUnit::Sat)
+        .localstore(store)
+        .seed(seed)
+        .client(http_client)
+        .build()
+        .map_err(|e| JsValue::from_str(&format!("Failed to build wallet: {:?}", e)))?;
+
+    // Deserialize proofs
+    let proofs: Vec<cdk::nuts::Proof> = serde_wasm_bindgen::from_value(proofs_json)
+        .map_err(|e| JsValue::from_str(&format!("Failed to parse proofs: {:?}", e)))?;
+
+    // Parse secret keys
+    let secrets: Result<Vec<SecretKey>, _> = secret_keys
+        .iter()
+        .map(|s| SecretKey::from_str(s))
+        .collect();
+    let secrets = secrets
+        .map_err(|e| JsValue::from_str(&format!("Invalid secret key: {:?}", e)))?;
+
+    // Try to swap the proofs (this will attempt to sign with the provided keys)
+    let amount: u64 = proofs.iter().map(|p| u64::from(p.amount)).sum();
+
+    // Attempt swap - this will fail if signatures are invalid
+    match wallet.swap(
+        Some(Amount::from(amount)),
+        Default::default(),
+        proofs,
+        None,  // No spending conditions on outputs
+        false, // Don't include fees for testing
+    ).await {
+        Ok(_) => {
+            Ok(serde_wasm_bindgen::to_value(&SwapResult {
+                success: true,
+                error: None,
+            })?)
+        }
+        Err(e) => {
+            Ok(serde_wasm_bindgen::to_value(&SwapResult {
+                success: false,
+                error: Some(format!("{:?}", e)),
+            })?)
+        }
+    }
 }

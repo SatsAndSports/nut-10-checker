@@ -224,6 +224,67 @@ button.primary:hover {
     font-size: 0.9rem;
 }
 
+.test-steps {
+    margin-top: 1rem;
+    padding-left: 1rem;
+}
+
+.test-step {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    margin: 0.25rem 0;
+    border-radius: 4px;
+}
+
+.test-step.passed {
+    background: rgba(16, 185, 129, 0.1);
+}
+
+.test-step.failed {
+    background: rgba(239, 68, 68, 0.1);
+}
+
+.test-step.skipped {
+    background: rgba(156, 163, 175, 0.1);
+    opacity: 0.7;
+}
+
+.step-icon {
+    font-weight: bold;
+    min-width: 1.5rem;
+}
+
+.test-step.passed .step-icon {
+    color: var(--success);
+}
+
+.test-step.failed .step-icon {
+    color: var(--error);
+}
+
+.test-step.skipped .step-icon {
+    color: var(--text-light);
+}
+
+.step-name {
+    font-weight: 500;
+    flex: 1;
+}
+
+.step-result {
+    font-size: 0.85rem;
+    color: var(--text-light);
+}
+
+.step-details {
+    margin-top: 0.25rem;
+    padding-left: 2rem;
+    font-size: 0.85rem;
+    color: var(--error);
+}
+
 .results-actions {
     display: flex;
     gap: 0.5rem;

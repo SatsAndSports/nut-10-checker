@@ -1,6 +1,6 @@
 // IndexedDB setup
 const DB_NAME = 'nut10-checker';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let db;
 
@@ -16,6 +16,7 @@ async function initDB() {
 
         request.onupgradeneeded = (event) => {
             const db = event.target.result;
+            const oldVersion = event.oldVersion;
 
             // Mints store
             if (!db.objectStoreNames.contains('mints')) {
@@ -23,12 +24,22 @@ async function initDB() {
                 mintsStore.createIndex('url', 'url', { unique: true });
             }
 
-            // Test results store
-            if (!db.objectStoreNames.contains('results')) {
-                const resultsStore = db.createObjectStore('results', { keyPath: 'testId' });
+            // Test results store - migrate to new schema
+            if (oldVersion < 2) {
+                // Drop old results store if it exists
+                if (db.objectStoreNames.contains('results')) {
+                    db.deleteObjectStore('results');
+                }
+
+                // Create new results store with updated schema
+                const resultsStore = db.createObjectStore('results', {
+                    keyPath: 'id',
+                    autoIncrement: true
+                });
+                resultsStore.createIndex('testId', 'testId', { unique: false });
                 resultsStore.createIndex('timestamp', 'timestamp', { unique: false });
                 resultsStore.createIndex('mintUrl', 'mintUrl', { unique: false });
-                resultsStore.createIndex('testType', 'testType', { unique: false });
+                resultsStore.createIndex('state', 'state', { unique: false });
             }
         };
     });
@@ -115,16 +126,38 @@ async function getTestResults(filter = null) {
         request.onsuccess = () => {
             let results = request.result;
 
-            // Sort by timestamp descending
-            results.sort((a, b) => b.timestamp - a.timestamp);
+            // Sort by timestamp descending, then by step number
+            results.sort((a, b) => {
+                if (b.timestamp !== a.timestamp) {
+                    return b.timestamp - a.timestamp;
+                }
+                return a.stepNumber - b.stepNumber;
+            });
 
             // Apply filter
             if (filter === 'passed') {
-                results = results.filter(r => r.passed);
+                results = results.filter(r => r.state === 'Passed');
             } else if (filter === 'failed') {
-                results = results.filter(r => !r.passed);
+                results = results.filter(r => r.state === 'Failed');
             }
 
+            resolve(results);
+        };
+        request.onerror = () => reject(request.error);
+    });
+}
+
+// Get all results for a specific test run
+async function getTestRunResults(testId) {
+    const tx = db.transaction(['results'], 'readonly');
+    const store = tx.objectStore('results');
+    const index = store.index('testId');
+
+    return new Promise((resolve, reject) => {
+        const request = index.getAll(testId);
+        request.onsuccess = () => {
+            const results = request.result;
+            results.sort((a, b) => a.stepNumber - b.stepNumber);
             resolve(results);
         };
         request.onerror = () => reject(request.error);
@@ -210,20 +243,58 @@ function renderResults(results) {
         return;
     }
 
-    container.innerHTML = results.map(result => `
-        <div class="test-result ${result.passed ? 'passed' : 'failed'}">
-            <div class="test-result-header">
-                <span class="test-result-title">${result.testType} - ${result.testCase}</span>
-                <span class="test-result-status">${result.passed ? '✓ PASS' : '✗ FAIL'}</span>
+    // Group results by testId
+    const grouped = {};
+    for (const result of results) {
+        if (!grouped[result.testId]) {
+            grouped[result.testId] = {
+                testId: result.testId,
+                testName: result.testName,
+                mintUrl: result.mintUrl,
+                timestamp: result.timestamp,
+                steps: []
+            };
+        }
+        grouped[result.testId].steps.push(result);
+    }
+
+    // Render grouped results
+    container.innerHTML = Object.values(grouped).map(test => {
+        // Determine overall status
+        const hasFailed = test.steps.some(s => s.state === 'Failed');
+        const allPassed = test.steps.every(s => s.state === 'Passed');
+        const overallStatus = hasFailed ? 'failed' : (allPassed ? 'passed' : 'partial');
+
+        return `
+            <div class="test-result ${overallStatus}">
+                <div class="test-result-header">
+                    <span class="test-result-title">${test.testName}</span>
+                    <span class="test-result-status">
+                        ${hasFailed ? '✗ FAILED' : (allPassed ? '✓ PASSED' : '⚠ PARTIAL')}
+                    </span>
+                </div>
+                <div class="test-result-details">
+                    <div>Mint: ${test.mintUrl}</div>
+                    <div>Time: ${new Date(test.timestamp).toLocaleString()}</div>
+                    <div class="test-steps">
+                        ${test.steps.map(step => {
+                            const icon = step.state === 'Passed' ? '✓' :
+                                        step.state === 'Failed' ? '✗' : '⊘';
+                            const stateClass = step.state.toLowerCase();
+                            return `
+                                <div class="test-step ${stateClass}">
+                                    <span class="step-icon">${icon}</span>
+                                    <span class="step-name">Step ${step.stepNumber}: ${step.stepName}</span>
+                                    <span class="step-result">(Expected: ${step.expected}, Got: ${step.actual})</span>
+                                    ${step.details ? `<div class="step-details">${step.details}</div>` : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
             </div>
-            <div class="test-result-details">
-                <div>Mint: ${result.mintUrl}</div>
-                <div>Expected: ${result.expected}, Actual: ${result.actual}</div>
-                <div>Time: ${new Date(result.timestamp).toLocaleString()}</div>
-                ${result.details ? `<div>Details: ${result.details}</div>` : ''}
-            </div>
-        </div>
-    `).join('');
+        `;
+    }).join('');
 }
 
 async function loadAndRenderMints() {
@@ -246,6 +317,7 @@ export {
     deleteMint,
     saveTestResult,
     getTestResults,
+    getTestRunResults,
     clearTestResults,
     exportResults,
     renderMints,
