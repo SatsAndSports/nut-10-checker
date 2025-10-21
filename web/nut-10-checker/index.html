@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NUT-10 Spending Conditions Checker</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔐 NUT-10 Spending Conditions Checker</h1>
+            <p class="subtitle">Interactive testing tool for Cashu spending conditions (P2PK, HTLC, SigAll)</p>
+        </header>
+
+        <section class="mints-section">
+            <h2>Mints</h2>
+            <div id="mints-list"></div>
+            <div class="add-mint">
+                <input type="text" id="mint-url" placeholder="Mint URL (e.g., http://localhost:3338)">
+                <button id="add-mint-btn">Add Mint</button>
+            </div>
+        </section>
+
+        <section class="wallet-section">
+            <h2>Wallet</h2>
+            <div id="wallet-info">
+                <p>Loading wallet...</p>
+            </div>
+            <div class="mint-controls">
+                <input type="number" id="mint-amount" placeholder="Amount (sat)" value="100" min="1">
+                <button id="mint-tokens-btn">Mint Test Tokens</button>
+            </div>
+        </section>
+
+        <!-- Mint Invoice Dialog -->
+        <div id="mint-dialog" class="dialog" style="display: none;">
+            <div class="dialog-content">
+                <h3>Pay Lightning Invoice</h3>
+                <div id="qr-code"></div>
+                <div id="invoice-text"></div>
+                <div id="payment-status">Waiting for payment...</div>
+                <button id="close-dialog-btn">Close</button>
+            </div>
+        </div>
+
+        <section class="tests-section">
+            <h2>Run Tests</h2>
+            <div class="test-categories">
+                <label>
+                    <input type="checkbox" id="test-p2pk" checked>
+                    P2PK 2-of-2 Multisig
+                </label>
+                <label>
+                    <input type="checkbox" id="test-sigall" checked>
+                    SigAll Transaction Integrity
+                </label>
+                <label>
+                    <input type="checkbox" id="test-htlc">
+                    HTLC (Hashed Timelock Contracts)
+                </label>
+            </div>
+            <button id="run-tests-btn" class="primary">Run Selected Tests</button>
+        </section>
+
+        <section class="results-section">
+            <h2>Test Results</h2>
+            <div class="results-filter">
+                <button class="filter-btn active" data-filter="all">All</button>
+                <button class="filter-btn" data-filter="passed">Passed</button>
+                <button class="filter-btn" data-filter="failed">Failed</button>
+            </div>
+            <div id="results-list"></div>
+            <div class="results-actions">
+                <button id="export-results-btn">Export Results</button>
+                <button id="clear-results-btn">Clear History</button>
+            </div>
+        </section>
+    </div>
+
+    <script type="module">
+        import init, {
+            greet,
+            check_nut11_support,
+            generate_test_keypairs,
+            generate_wallet_seed,
+            create_mint_quote,
+            check_mint_quote_status,
+            mint_tokens,
+            get_wallet_balance
+        } from './pkg/nut_10_checker.js';
+        import {
+            initDB,
+            saveMint,
+            getMints,
+            getMint,
+            setActiveMint,
+            getActiveMint,
+            deleteMint,
+            saveTestResult,
+            clearTestResults,
+            exportResults,
+            loadAndRenderMints,
+            loadAndRenderResults
+        } from './app.js';
+
+        let wasm;
+
+        async function run() {
+            // Initialize WASM
+            wasm = await init();
+            console.log(greet('WASM'));
+
+            // Initialize IndexedDB
+            await initDB();
+            console.log('IndexedDB initialized');
+
+            // Initialize app
+            await initApp();
+        }
+
+        async function initApp() {
+            document.getElementById('wallet-info').innerHTML = '<p>✅ Wallet ready (WASM + IndexedDB loaded)</p>';
+
+            // Event listeners
+            document.getElementById('add-mint-btn').addEventListener('click', addMint);
+            document.getElementById('mint-url').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    addMint();
+                }
+            });
+            document.getElementById('mint-tokens-btn').addEventListener('click', mintTokens);
+            document.getElementById('close-dialog-btn').addEventListener('click', closeDialog);
+            document.getElementById('run-tests-btn').addEventListener('click', runTests);
+            document.getElementById('export-results-btn').addEventListener('click', handleExportResults);
+            document.getElementById('clear-results-btn').addEventListener('click', handleClearResults);
+
+            // Filter buttons
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                    e.target.classList.add('active');
+                    await loadAndRenderResults(e.target.dataset.filter);
+                });
+            });
+
+            // Listen for balance update requests
+            window.addEventListener('updateBalance', async (e) => {
+                await updateBalanceDisplay(e.detail.mintUrl);
+            });
+
+            // Load persisted data
+            await loadAndRenderMints();
+            await loadAndRenderResults();
+
+            // Update balances for all mints
+            const mints = await getMints();
+            for (const mint of mints) {
+                await updateBalanceDisplay(mint.url);
+            }
+        }
+
+        async function addMint() {
+            const url = document.getElementById('mint-url').value.trim();
+            if (!url) return;
+
+            try {
+                // Check if mint supports NUT-11
+                const supported = await check_nut11_support(url);
+
+                if (!supported) {
+                    alert(`Mint ${url} does not support NUT-11 (P2PK). Cannot add.`);
+                    return;
+                }
+
+                // Generate wallet seed for this mint
+                const seed = generate_wallet_seed();
+                console.log('Generated seed for', url);
+
+                await saveMint(url, { nut11Supported: true, seed: seed });
+                document.getElementById('mint-url').value = '';
+                await loadAndRenderMints();
+
+                // Update balances for ALL mints after re-rendering
+                const allMints = await getMints();
+                for (const mint of allMints) {
+                    await updateBalanceDisplay(mint.url);
+                }
+
+                console.log('✅ Added mint:', url);
+            } catch (err) {
+                console.error('Failed to add mint:', err);
+                alert(`Failed to add mint: ${err.message || err}`);
+            }
+        }
+
+        async function runTests() {
+            const testP2PK = document.getElementById('test-p2pk').checked;
+            const testSigAll = document.getElementById('test-sigall').checked;
+            const testHTLC = document.getElementById('test-htlc').checked;
+
+            if (!testP2PK && !testSigAll && !testHTLC) {
+                alert('Please select at least one test category');
+                return;
+            }
+
+            const mints = await getMints();
+            if (mints.length === 0) {
+                alert('Please add at least one mint first');
+                return;
+            }
+
+            console.log('Running tests:', { testP2PK, testSigAll, testHTLC });
+
+            // Generate test keypairs
+            const keypairs = generate_test_keypairs();
+            console.log('Generated keypairs:', keypairs);
+
+            // TODO: Implement actual test execution
+            alert('Test execution coming soon! Check console for keypairs.');
+
+            await loadAndRenderResults();
+        }
+
+        async function handleExportResults() {
+            const results = await getTestResults();
+            if (results.length === 0) {
+                alert('No results to export');
+                return;
+            }
+            exportResults(results);
+        }
+
+        async function handleClearResults() {
+            if (confirm('Clear all test results? This cannot be undone.')) {
+                await clearTestResults();
+                await loadAndRenderResults();
+            }
+        }
+
+        async function mintTokens() {
+            const mint = await getActiveMint();
+            if (!mint) {
+                alert('Please add a mint first');
+                return;
+            }
+
+            const amount = parseInt(document.getElementById('mint-amount').value);
+            if (!amount || amount < 1) {
+                alert('Please enter a valid amount');
+                return;
+            }
+
+            try {
+                // Create mint quote (amount needs to be BigInt)
+                const quote = await create_mint_quote(mint.url, BigInt(amount));
+                console.log('Mint quote created:', quote);
+
+                // Show invoice dialog
+                showInvoiceDialog(mint.url, quote.quote_id, quote.request);
+
+                // Start polling for payment
+                pollPaymentStatus(mint.url, quote.quote_id);
+            } catch (err) {
+                console.error('Failed to create mint quote:', err);
+                alert(`Failed to create mint quote: ${err.message || err}`);
+            }
+        }
+
+        function showInvoiceDialog(mintUrl, quoteId, invoice) {
+            const dialog = document.getElementById('mint-dialog');
+            const qrContainer = document.getElementById('qr-code');
+            const invoiceText = document.getElementById('invoice-text');
+            const statusText = document.getElementById('payment-status');
+
+            // Clear previous QR code
+            qrContainer.innerHTML = '';
+
+            // Generate QR code
+            new QRCode(qrContainer, {
+                text: invoice,
+                width: 256,
+                height: 256,
+            });
+
+            // Show invoice text
+            invoiceText.textContent = invoice;
+            invoiceText.style.cursor = 'pointer';
+            invoiceText.title = 'Click to copy';
+            invoiceText.onclick = () => {
+                navigator.clipboard.writeText(invoice);
+                alert('Invoice copied to clipboard!');
+            };
+
+            // Reset status
+            statusText.textContent = 'Waiting for payment...';
+            statusText.className = '';
+
+            // Show dialog
+            dialog.style.display = 'flex';
+        }
+
+        async function handlePaymentSuccess(mintUrl, quoteId, statusText) {
+            try {
+                // Get mint with seed
+                console.log('Looking for mint with URL:', mintUrl);
+                const allMints = await getMints();
+                console.log('All mints in DB:', allMints);
+
+                const mint = await getMint(mintUrl);
+                console.log('Mint object:', mint);
+                if (!mint) {
+                    console.error('Mint not found:', mintUrl);
+                    statusText.textContent = '❌ Error: mint not found';
+                    return;
+                }
+                if (!mint.info) {
+                    console.error('Mint.info is null/undefined:', mint);
+                    statusText.textContent = '❌ Error: mint.info missing';
+                    return;
+                }
+                if (!mint.info.seed) {
+                    console.error('No seed found for mint. mint.info:', mint.info);
+                    statusText.textContent = '❌ Error: wallet not initialized';
+                    return;
+                }
+
+                // Mint the tokens
+                statusText.textContent = '⏳ Minting tokens...';
+                const minted = await mint_tokens(mintUrl, mint.info.seed, quoteId);
+                console.log('✅ Minted', minted, 'sat');
+
+                // Update balance display
+                await updateBalanceDisplay(mintUrl);
+
+                statusText.textContent = `✅ Minted ${minted} sat!`;
+                statusText.className = 'paid';
+
+                setTimeout(() => {
+                    closeDialog();
+                }, 2000);
+            } catch (err) {
+                console.error('Failed to mint tokens:', err);
+                statusText.textContent = `❌ Minting failed: ${err.message || err}`;
+            }
+        }
+
+        async function updateBalanceDisplay(mintUrl) {
+            try {
+                const mint = await getMint(mintUrl);
+                if (!mint || !mint.info.seed) {
+                    console.log('No seed for mint:', mintUrl);
+                    return;
+                }
+
+                console.log('Fetching balance for', mintUrl);
+                const balance = await get_wallet_balance(mintUrl, mint.info.seed);
+                console.log('Balance for', mintUrl, ':', balance);
+
+                // Update the UI
+                const mintElement = document.querySelector(`.mint-item[data-url="${CSS.escape(mintUrl)}"]`);
+                if (mintElement) {
+                    const balanceElement = mintElement.querySelector('.mint-balance');
+                    if (balanceElement) {
+                        balanceElement.textContent = `Balance: ${balance} sat`;
+                    }
+                } else {
+                    console.error('Could not find mint element for:', mintUrl);
+                }
+            } catch (err) {
+                console.error('Failed to get balance for', mintUrl, ':', err);
+
+                // Still update UI to show error
+                const mintElement = document.querySelector(`.mint-item[data-url="${CSS.escape(mintUrl)}"]`);
+                if (mintElement) {
+                    const balanceElement = mintElement.querySelector('.mint-balance');
+                    if (balanceElement) {
+                        balanceElement.textContent = `Balance: Error`;
+                    }
+                }
+            }
+        }
+
+        async function pollPaymentStatus(mintUrl, quoteId) {
+            const statusText = document.getElementById('payment-status');
+            const maxAttempts = 60; // 5 minutes (60 * 5 seconds)
+            let attempts = 0;
+
+            const interval = setInterval(async () => {
+                attempts++;
+
+                try {
+                    const paid = await check_mint_quote_status(mintUrl, quoteId);
+
+                    if (paid) {
+                        clearInterval(interval);
+                        await handlePaymentSuccess(mintUrl, quoteId, statusText);
+                    } else if (attempts >= maxAttempts) {
+                        clearInterval(interval);
+                        statusText.textContent = '⏱️ Payment timeout. Please try again.';
+                    }
+                } catch (err) {
+                    // Check if error message contains payment success indicators
+                    const errStr = err.toString();
+                    if (errStr.includes('"paid":true') || errStr.includes('"state":"PAID"')) {
+                        clearInterval(interval);
+                        await handlePaymentSuccess(mintUrl, quoteId, statusText);
+                    } else {
+                        console.error('Error checking payment status:', err);
+                    }
+                }
+            }, 5000); // Check every 5 seconds
+        }
+
+        function closeDialog() {
+            document.getElementById('mint-dialog').style.display = 'none';
+        }
+
+        run().catch(console.error);
+    </script>
+</body>
+</html>

@@ -1,0 +1,325 @@
+:root {
+    --primary: #6366f1;
+    --primary-dark: #4f46e5;
+    --success: #10b981;
+    --error: #ef4444;
+    --warning: #f59e0b;
+    --bg: #f9fafb;
+    --card-bg: #ffffff;
+    --text: #1f2937;
+    --text-light: #6b7280;
+    --border: #e5e7eb;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem;
+}
+
+header {
+    text-align: center;
+    margin-bottom: 3rem;
+}
+
+h1 {
+    font-size: 2.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.subtitle {
+    color: var(--text-light);
+    font-size: 1.1rem;
+}
+
+section {
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+h2 {
+    margin-bottom: 1.5rem;
+    color: var(--text);
+    font-size: 1.5rem;
+}
+
+/* Mints Section */
+#mints-list {
+    margin-bottom: 1rem;
+}
+
+.mint-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+}
+
+.mint-item.active {
+    border-color: var(--primary);
+    background: rgba(99, 102, 241, 0.05);
+}
+
+.mint-item .mint-url {
+    font-weight: 500;
+}
+
+.mint-item .mint-balance {
+    color: var(--text-light);
+}
+
+.mint-item .active-badge {
+    color: var(--primary);
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.mint-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.add-mint {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.add-mint input {
+    flex: 1;
+}
+
+/* Form Elements */
+input[type="text"] {
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 1rem;
+}
+
+button {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background 0.2s;
+    background: var(--border);
+    color: var(--text);
+}
+
+button:hover {
+    opacity: 0.9;
+}
+
+button.primary {
+    background: var(--primary);
+    color: white;
+}
+
+button.primary:hover {
+    background: var(--primary-dark);
+}
+
+/* Test Categories */
+.test-categories {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.test-categories label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 1.1rem;
+    cursor: pointer;
+}
+
+.test-categories input[type="checkbox"] {
+    width: 1.25rem;
+    height: 1.25rem;
+    cursor: pointer;
+}
+
+/* Results */
+.results-filter {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.filter-btn {
+    padding: 0.5rem 1rem;
+}
+
+.filter-btn.active {
+    background: var(--primary);
+    color: white;
+}
+
+#results-list {
+    margin-bottom: 1.5rem;
+}
+
+.test-result {
+    padding: 1rem;
+    border-left: 4px solid var(--border);
+    margin-bottom: 1rem;
+    background: var(--bg);
+    border-radius: 4px;
+}
+
+.test-result.passed {
+    border-left-color: var(--success);
+}
+
+.test-result.failed {
+    border-left-color: var(--error);
+}
+
+.test-result-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+}
+
+.test-result-title {
+    font-weight: 600;
+}
+
+.test-result-status {
+    font-weight: 500;
+}
+
+.test-result.passed .test-result-status {
+    color: var(--success);
+}
+
+.test-result.failed .test-result-status {
+    color: var(--error);
+}
+
+.test-result-details {
+    color: var(--text-light);
+    font-size: 0.9rem;
+}
+
+.results-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+/* Wallet Section */
+#wallet-info {
+    padding: 1rem;
+    background: var(--bg);
+    border-radius: 8px;
+    margin-bottom: 1rem;
+}
+
+/* Mint controls */
+.mint-controls {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.mint-controls input {
+    width: 150px;
+}
+
+/* Dialog */
+.dialog {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.dialog-content {
+    background: var(--card-bg);
+    padding: 2rem;
+    border-radius: 12px;
+    max-width: 500px;
+    width: 90%;
+    text-align: center;
+}
+
+#qr-code {
+    margin: 1.5rem 0;
+    display: flex;
+    justify-content: center;
+}
+
+#qr-code canvas {
+    border: 2px solid var(--border);
+    border-radius: 8px;
+}
+
+#invoice-text {
+    word-break: break-all;
+    font-family: monospace;
+    font-size: 0.85rem;
+    background: var(--bg);
+    padding: 1rem;
+    border-radius: 8px;
+    margin: 1rem 0;
+    max-height: 100px;
+    overflow-y: auto;
+}
+
+#payment-status {
+    margin: 1rem 0;
+    font-weight: 600;
+    color: var(--warning);
+}
+
+#payment-status.paid {
+    color: var(--success);
+}
+
+.empty-state {
+    color: var(--text-light);
+    font-style: italic;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .container {
+        padding: 1rem;
+    }
+
+    h1 {
+        font-size: 2rem;
+    }
+
+    section {
+        padding: 1.5rem;
+    }
+}
