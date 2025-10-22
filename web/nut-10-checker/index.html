@@ -45,6 +45,15 @@
             </div>
         </div>
 
+        <!-- Check State Results Dialog -->
+        <div id="check-state-dialog" class="dialog" style="display: none;">
+            <div class="dialog-content">
+                <h3>Proof State Check Results</h3>
+                <div id="check-state-results"></div>
+                <button id="close-check-state-btn">Close</button>
+            </div>
+        </div>
+
         <section class="tests-section">
             <h2>Run Tests</h2>
             <div class="test-categories">
@@ -92,7 +101,8 @@
             get_wallet_balance_by_state,
             get_mint_denominations,
             swap_to_p2pk_2of2,
-            swap_with_signatures
+            swap_with_signatures,
+            check_proofs_state
         } from './pkg/nut_10_checker.js';
         import {
             initDB,
@@ -716,6 +726,63 @@
         function closeDialog() {
             document.getElementById('mint-dialog').style.display = 'none';
         }
+
+        function closeCheckStateDialog() {
+            document.getElementById('check-state-dialog').style.display = 'none';
+        }
+
+        async function handleCheckState(mintUrl) {
+            try {
+                const mint = await getMint(mintUrl);
+                if (!mint || !mint.info.seed) {
+                    alert('No wallet found for this mint');
+                    return;
+                }
+
+                console.log('Checking proof states for', mintUrl);
+
+                // Call WASM function to check states
+                const result = await check_proofs_state(mintUrl, mint.info.seed);
+                console.log('Check state result:', result);
+
+                // Extract values (WASM returns Map)
+                const checked = result.get ? result.get('checked') : result.checked;
+                const changes = result.get ? result.get('changes') : result.changes;
+
+                // Display results in modal
+                const resultsDiv = document.getElementById('check-state-results');
+
+                if (checked === 0) {
+                    resultsDiv.innerHTML = '<p>No proofs found in wallet.</p>';
+                } else if (Object.keys(changes).length === 0) {
+                    resultsDiv.innerHTML = `<p>Checked ${checked} proof(s). All states are up to date.</p>`;
+                } else {
+                    // Build summary of changes
+                    let html = `<p>Checked ${checked} proof(s). Found state changes:</p><ul>`;
+                    for (const [transition, amount] of Object.entries(changes)) {
+                        html += `<li><strong>${transition}:</strong> ${amount} sat</li>`;
+                    }
+                    html += '</ul>';
+                    resultsDiv.innerHTML = html;
+                }
+
+                // Show modal
+                document.getElementById('check-state-dialog').style.display = 'flex';
+
+                // Update balance display after checking
+                await updateBalanceDisplay(mintUrl);
+            } catch (err) {
+                console.error('Failed to check proof states:', err);
+                alert(`Failed to check proof states: ${err.message || err}`);
+            }
+        }
+
+        // Event listeners
+        window.addEventListener('checkState', (e) => {
+            handleCheckState(e.detail.mintUrl);
+        });
+
+        document.getElementById('close-check-state-btn').addEventListener('click', closeCheckStateDialog);
 
         run().catch(console.error);
     </script>

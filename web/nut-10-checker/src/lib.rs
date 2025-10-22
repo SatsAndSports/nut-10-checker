@@ -620,6 +620,97 @@ pub struct SwapResult {
     pub error: Option<String>,
 }
 
+/// Check proof states from the mint and update local storage
+#[wasm_bindgen]
+pub async fn check_proofs_state(
+    mint_url: String,
+    seed_words: String,
+) -> Result<JsValue, JsValue> {
+    use cdk::nuts::{CheckStateRequest, CheckStateResponse};
+    use cdk::wallet::MintConnector;
+
+    let url: MintUrl = mint_url.parse()
+        .map_err(|e| JsValue::from_str(&format!("Invalid mint URL: {:?}", e)))?;
+
+    let mnemonic = Mnemonic::parse(&seed_words)
+        .map_err(|e| JsValue::from_str(&format!("Invalid seed: {:?}", e)))?;
+
+    let seed = mnemonic.to_seed("");
+
+    let storage_key = format!("wallet_{}", url.to_string().replace("://", "_").replace("/", "_"));
+    let store = Arc::new(LocalStorageWalletDatabase::new(&storage_key).await?);
+
+    let http_client = HttpClient::new(url.clone());
+
+    let wallet = WalletBuilder::new()
+        .mint_url(url.clone())
+        .unit(CurrencyUnit::Sat)
+        .localstore(store)
+        .seed(seed)
+        .client(http_client.clone())
+        .build()
+        .map_err(|e| JsValue::from_str(&format!("Failed to build wallet: {:?}", e)))?;
+
+    // Get all proofs from local storage
+    let all_proofs = wallet.localstore
+        .get_proofs(
+            Some(wallet.mint_url.clone()),
+            Some(wallet.unit.clone()),
+            None,
+            None,
+        )
+        .await
+        .map_err(|e| JsValue::from_str(&format!("Failed to get proofs: {:?}", e)))?;
+
+    if all_proofs.is_empty() {
+        return Ok(serde_wasm_bindgen::to_value(&serde_json::json!({
+            "checked": 0,
+            "changes": {},
+        }))?);
+    }
+
+    web_sys::console::log_1(&format!("Checking state of {} proofs with mint", all_proofs.len()).into());
+
+    // Extract Y values to check with mint
+    let ys: Vec<_> = all_proofs.iter().map(|p| p.y.clone()).collect();
+
+    // Query mint for proof states using post_check_state
+    let request = CheckStateRequest { ys: ys.clone() };
+    let response: CheckStateResponse = http_client.post_check_state(request).await
+        .map_err(|e| JsValue::from_str(&format!("Failed to check proof states: {:?}", e)))?;
+
+    // Track changes by transition type
+    use std::collections::HashMap;
+    let mut changes: HashMap<String, u64> = HashMap::new();
+
+    // Update local storage with actual states from mint
+    for (proof_info, proof_state) in all_proofs.iter().zip(response.states.iter()) {
+        let new_state = proof_state.state;
+
+        // Only update if state changed
+        if proof_info.state != new_state {
+            let amount = u64::from(proof_info.proof.amount);
+            let transition = format!("{:?} => {:?}", proof_info.state, new_state);
+
+            *changes.entry(transition.clone()).or_insert(0) += amount;
+
+            wallet.localstore.update_proofs_state(vec![proof_info.y.clone()], new_state).await
+                .map_err(|e| JsValue::from_str(&format!("Failed to update proof state: {:?}", e)))?;
+
+            web_sys::console::log_1(&format!("Updated proof from {:?} to {:?} ({} sat)",
+                proof_info.state, new_state, amount).into());
+        }
+    }
+
+    web_sys::console::log_1(&format!("Checked {} proofs, found {} state transitions",
+        all_proofs.len(), changes.len()).into());
+
+    Ok(serde_wasm_bindgen::to_value(&serde_json::json!({
+        "checked": all_proofs.len(),
+        "changes": changes,
+    }))?)
+}
+
 /// Attempt to swap (spend) proofs with specific signatures
 #[wasm_bindgen]
 pub async fn swap_with_signatures(
