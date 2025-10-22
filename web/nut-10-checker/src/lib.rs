@@ -290,6 +290,45 @@ pub async fn get_wallet_balance(
     Ok(u64::from(balance))
 }
 
+/// Helper function to safely execute a swap with proper state management
+///
+/// Preconditions:
+/// - Input proofs must be in Unspent state
+///
+/// State transitions:
+/// - Success: Unspent → Pending → [deleted]
+/// - Failure: Unspent → Pending → Pending (user can later use "Check State" button to query mint)
+async fn safe_swap(
+    wallet: &cdk::wallet::Wallet,
+    http_client: &HttpClient,
+    swap_request: SwapRequest,
+    input_ys: Vec<PublicKey>,
+) -> Result<cdk::nuts::SwapResponse, cdk::error::Error> {
+    use cdk::wallet::MintConnector;
+
+    // Mark input proofs as Pending before attempting swap
+    web_sys::console::log_1(&format!("safe_swap: Marking {} input proofs as Pending", input_ys.len()).into());
+    wallet.localstore
+        .update_proofs_state(input_ys.clone(), cdk_common::nuts::State::Pending)
+        .await?;
+
+    // Execute swap via HTTP client
+    match http_client.post_swap(swap_request).await {
+        Ok(response) => {
+            // Swap succeeded - delete spent proofs
+            web_sys::console::log_1(&format!("safe_swap: Swap successful, deleting {} spent proofs", input_ys.len()).into());
+            wallet.localstore.update_proofs(vec![], input_ys).await?;
+            Ok(response)
+        }
+        Err(e) => {
+            // Swap failed - leave as Pending
+            // User can use "Check State" button to query mint for actual state
+            web_sys::console::log_1(&format!("safe_swap: Swap failed ({:?}), leaving as Pending (use Check State to verify)", e).into());
+            Err(e)
+        }
+    }
+}
+
 /// Generate two keypairs for testing
 #[wasm_bindgen]
 pub fn generate_test_keypairs() -> Result<JsValue, JsValue> {
@@ -456,12 +495,12 @@ pub async fn swap_to_p2pk_2of2(
         Some(conditions),
     );
 
-    // Get proofs from wallet
+    // Get ONLY unspent proofs from wallet
     let all_proofs = wallet.localstore
         .get_proofs(
             Some(wallet.mint_url.clone()),
             Some(wallet.unit.clone()),
-            None,
+            Some(vec![cdk_common::nuts::State::Unspent]), // Only Unspent proofs
             None,
         )
         .await
@@ -469,7 +508,7 @@ pub async fn swap_to_p2pk_2of2(
 
     // Select proofs that sum to at least total_p2pk (7 sat)
     let mut input_proofs = Vec::new();
-    let mut input_ys = Vec::new(); // Track Y values to remove from wallet
+    let mut input_ys = Vec::new(); // Track Y values for state management
     let mut input_total: u64 = 0;
 
     for proof_info in all_proofs {
@@ -541,29 +580,13 @@ pub async fn swap_to_p2pk_2of2(
         }
     }
 
-    // Mark input proofs as Pending before attempting swap
-    web_sys::console::log_1(&format!("Marking {} input proofs as Pending", input_ys.len()).into());
-    wallet.localstore.update_proofs_state(input_ys.clone(), cdk_common::nuts::State::Pending).await
-        .map_err(|e| JsValue::from_str(&format!("Failed to mark proofs as pending: {:?}", e)))?;
-
-    // Create swap request (like spillman)
+    // Create swap request
     let swap_request = SwapRequest::new(input_proofs, blinded_outputs);
 
-    // Execute swap via HTTP client
-    let swap_response = match http_client2.post_swap(swap_request).await {
-        Ok(response) => response,
-        Err(e) => {
-            // Swap failed - mark proofs back as Unspent
-            web_sys::console::log_1(&format!("Swap failed, marking proofs back as Unspent").into());
-            let _ = wallet.localstore.update_proofs_state(input_ys, cdk_common::nuts::State::Unspent).await;
-            return Err(JsValue::from_str(&format!("Failed to swap: {:?}", e)));
-        }
-    };
-
-    // Swap succeeded - mark proofs as Spent and remove them
-    web_sys::console::log_1(&format!("Swap successful, removing {} spent proofs from wallet", input_ys.len()).into());
-    wallet.localstore.update_proofs(vec![], input_ys).await
-        .map_err(|e| JsValue::from_str(&format!("Failed to remove spent proofs: {:?}", e)))?;
+    // Execute swap using safe_swap helper (handles state transitions)
+    let swap_response = safe_swap(&wallet, &http_client2, swap_request, input_ys)
+        .await
+        .map_err(|e| JsValue::from_str(&format!("Failed to swap for P2PK tokens: {:?}", e)))?;
 
     // Get mint keys to unblind
     let all_keys = http_client2.get_mint_keys().await
