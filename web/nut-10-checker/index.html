@@ -910,6 +910,16 @@
                 );
                 console.log('  Got 2 regular proofs (no spending conditions)');
 
+                // 2f. Add regular proofs back to wallet
+                console.log('  2f. Adding regular proofs back to wallet...');
+                try {
+                    await add_proofs_to_wallet(mint.url, mint.info.seed, regularProofs);
+                    console.log('  Successfully added output proofs to wallet');
+                    await updateBalanceDisplay(mint.url);
+                } catch (addErr) {
+                    console.error('  Failed to add proofs to wallet:', addErr);
+                }
+
                 await saveTestResult({
                     testId, testName, mintUrl: mint.url, timestamp,
                     stepNumber: 2, stepName: 'Spend P2PK proofs with 2-of-2 signatures',
