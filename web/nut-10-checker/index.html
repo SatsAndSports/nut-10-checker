@@ -102,7 +102,8 @@
             get_mint_denominations,
             swap_to_p2pk_2of2,
             swap_with_signatures,
-            check_proofs_state
+            check_proofs_state,
+            add_proofs_to_wallet
         } from './pkg/nut_10_checker.js';
         import {
             initDB,
@@ -465,6 +466,21 @@
                 );
 
                 if (result.success) {
+                    // Store output proofs back to wallet to avoid losing sats
+                    if (result.proofs && result.proofs.length > 0) {
+                        console.log('Step 4: Adding output proofs back to wallet:', result.proofs);
+                        try {
+                            await add_proofs_to_wallet(mint.url, mint.info.seed, result.proofs);
+                            console.log('Successfully added output proofs to wallet');
+
+                            // Update balance display
+                            await updateBalanceDisplay(mint.url);
+                        } catch (addErr) {
+                            console.error('Failed to add proofs to wallet:', addErr);
+                            // Still mark test as passed, but note the issue
+                        }
+                    }
+
                     await saveTestResult({
                         testId, testName, mintUrl: mint.url, timestamp,
                         stepNumber: 4, stepName: 'Sign with both Alice and Bob',

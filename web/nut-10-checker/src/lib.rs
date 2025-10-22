@@ -641,6 +641,60 @@ pub async fn swap_to_p2pk_2of2(
 pub struct SwapResult {
     pub success: bool,
     pub error: Option<String>,
+    pub proofs: Option<Proofs>,
+}
+
+/// Add proofs to wallet storage as Unspent
+#[wasm_bindgen]
+pub async fn add_proofs_to_wallet(
+    mint_url: String,
+    seed_words: String,
+    proofs_json: JsValue,
+) -> Result<(), JsValue> {
+    let url: MintUrl = mint_url.parse()
+        .map_err(|e| JsValue::from_str(&format!("Invalid mint URL: {:?}", e)))?;
+
+    let mnemonic = Mnemonic::parse(&seed_words)
+        .map_err(|e| JsValue::from_str(&format!("Invalid seed: {:?}", e)))?;
+
+    let seed = mnemonic.to_seed("");
+
+    let storage_key = format!("wallet_{}", url.to_string().replace("://", "_").replace("/", "_"));
+    let store = Arc::new(LocalStorageWalletDatabase::new(&storage_key).await?);
+
+    let http_client = HttpClient::new(url.clone());
+
+    let wallet = WalletBuilder::new()
+        .mint_url(url.clone())
+        .unit(CurrencyUnit::Sat)
+        .localstore(store)
+        .seed(seed)
+        .client(http_client)
+        .build()
+        .map_err(|e| JsValue::from_str(&format!("Failed to build wallet: {:?}", e)))?;
+
+    // Deserialize proofs
+    let proofs: Proofs = serde_wasm_bindgen::from_value(proofs_json)
+        .map_err(|e| JsValue::from_str(&format!("Failed to parse proofs: {:?}", e)))?;
+
+    web_sys::console::log_1(&format!("Adding {} proofs to wallet as Unspent", proofs.len()).into());
+
+    // Convert proofs to ProofInfo and store them
+    for proof in proofs {
+        let proof_info = cdk_common::common::ProofInfo::new(
+            proof,
+            wallet.mint_url.clone(),
+            cdk_common::nuts::State::Unspent,
+            wallet.unit.clone(),
+        )
+        .map_err(|e| JsValue::from_str(&format!("Failed to create proof info: {:?}", e)))?;
+
+        wallet.localstore.update_proofs(vec![proof_info], vec![]).await
+            .map_err(|e| JsValue::from_str(&format!("Failed to store proof: {:?}", e)))?;
+    }
+
+    web_sys::console::log_1(&format!("Successfully added proofs to wallet").into());
+    Ok(())
 }
 
 /// Check proof states from the mint and update local storage
@@ -767,9 +821,11 @@ pub async fn swap_with_signatures(
 
     // Create blinded outputs (no spending conditions)
     let mut outputs = Vec::new();
+    let mut secrets_and_factors = Vec::new();
+
     for proof in &proofs {
         let secret = Secret::generate();
-        let (blinded_point, _blinding_factor) = blind_message(&secret.to_bytes(), None)
+        let (blinded_point, blinding_factor) = blind_message(&secret.to_bytes(), None)
             .map_err(|e| JsValue::from_str(&format!("Failed to blind message: {:?}", e)))?;
 
         outputs.push(BlindedMessage::new(
@@ -777,6 +833,7 @@ pub async fn swap_with_signatures(
             active_keyset_id,
             blinded_point,
         ));
+        secrets_and_factors.push((secret, blinding_factor));
     }
 
     // Create swap request
@@ -790,16 +847,37 @@ pub async fn swap_with_signatures(
 
     // Submit swap request to mint
     match http_client.post_swap(swap_request).await {
-        Ok(_) => {
+        Ok(swap_response) => {
+            // Get mint keys to unblind the response
+            let all_keys = http_client.get_mint_keys().await
+                .map_err(|e| JsValue::from_str(&format!("Failed to get mint keys: {:?}", e)))?;
+            let mint_keys = all_keys.iter()
+                .find(|k| k.id == active_keyset_id)
+                .ok_or_else(|| JsValue::from_str("Keyset not found"))?;
+
+            // Unblind signatures to create output proofs
+            let secrets: Vec<Secret> = secrets_and_factors.iter().map(|(s, _)| s.clone()).collect();
+            let factors = secrets_and_factors.iter().map(|(_, f)| f.clone()).collect();
+
+            let output_proofs = construct_proofs(
+                swap_response.signatures,
+                factors,
+                secrets,
+                &mint_keys.keys,
+            )
+            .map_err(|e| JsValue::from_str(&format!("Failed to construct proofs: {:?}", e)))?;
+
             Ok(serde_wasm_bindgen::to_value(&SwapResult {
                 success: true,
                 error: None,
+                proofs: Some(output_proofs),
             })?)
         }
         Err(e) => {
             Ok(serde_wasm_bindgen::to_value(&SwapResult {
                 success: false,
                 error: Some(format!("{:?}", e)),
+                proofs: None,
             })?)
         }
     }
