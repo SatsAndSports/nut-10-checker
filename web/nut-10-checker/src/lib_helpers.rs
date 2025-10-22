@@ -169,6 +169,49 @@ pub fn create_spending_conditions_with_locktime_refund(
     Ok(serde_wasm_bindgen::to_value(&spending_conditions)?)
 }
 
+/// Create spending conditions with m-of-n multisig before and after locktime
+/// Before locktime: requires num_sigs from [primary_pubkey, ...additional_pubkeys]
+/// After locktime: requires num_sigs_refund from refund_keys
+#[wasm_bindgen]
+pub fn create_spending_conditions_multisig_locktime(
+    primary_pubkey: String,
+    additional_pubkeys: Vec<String>,
+    refund_pubkeys: Vec<String>,
+    locktime: u64,
+    num_sigs: u64,
+    num_sigs_refund: u64,
+) -> Result<JsValue, JsValue> {
+    let primary_pk = PublicKey::from_str(&primary_pubkey)
+        .map_err(|e| JsValue::from_str(&format!("Invalid primary pubkey: {:?}", e)))?;
+
+    let additional_pks: Result<Vec<PublicKey>, _> = additional_pubkeys
+        .iter()
+        .map(|s| PublicKey::from_str(s))
+        .collect();
+    let additional_pks = additional_pks
+        .map_err(|e| JsValue::from_str(&format!("Invalid additional pubkey: {:?}", e)))?;
+
+    let refund_pks: Result<Vec<PublicKey>, _> = refund_pubkeys
+        .iter()
+        .map(|s| PublicKey::from_str(s))
+        .collect();
+    let refund_pks = refund_pks
+        .map_err(|e| JsValue::from_str(&format!("Invalid refund pubkey: {:?}", e)))?;
+
+    let conditions = Conditions::new(
+        Some(locktime),           // Locktime
+        Some(additional_pks),     // Additional pubkeys (beyond primary)
+        Some(refund_pks),         // Refund keys (can spend after locktime)
+        Some(num_sigs),           // num_sigs: require N signatures before locktime
+        None,                      // No SigFlag (default SigInputs)
+        Some(num_sigs_refund),    // num_sigs_refund: require M signatures after locktime
+    ).map_err(|e| JsValue::from_str(&format!("Failed to create conditions: {:?}", e)))?;
+
+    let spending_conditions = SpendingConditions::new_p2pk(primary_pk, Some(conditions));
+
+    Ok(serde_wasm_bindgen::to_value(&spending_conditions)?)
+}
+
 /// Create a SwapRequest from input proofs and blinded outputs (does not sign)
 #[wasm_bindgen]
 pub fn create_swap_request(

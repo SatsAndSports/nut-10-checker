@@ -117,6 +117,7 @@
             create_blinded_outputs_with_p2pk,
             create_spending_conditions_p2pk_2of2,
             create_spending_conditions_with_locktime_refund,
+            create_spending_conditions_multisig_locktime,
             create_swap_request,
             sign_swap_request_sigall,
             sign_swap_request_p2pk,
@@ -1160,30 +1161,35 @@
                 // Skip remaining steps
                 await saveTestResult({
                     testId, testName, mintUrl: mint.url, timestamp,
-                    stepNumber: 2, stepName: 'Try spending with Alice (before locktime)',
+                    stepNumber: 2, stepName: 'Sign with A,B,C,D (mixed)',
                     expected: 'Reject', actual: 'Skipped', state: 'Skipped'
-                });
-                await loadAndRenderResults();
-                await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
-                    stepNumber: 3, stepName: 'Spend with Bob (refund key)',
-                    expected: 'Accept', actual: 'Skipped', state: 'Skipped'
                 });
                 await loadAndRenderResults();
                 return;
             }
 
-            // Generate test keypairs
-            const keypairs = generate_test_keypairs();
-            const aliceSecret = keypairs.get ? keypairs.get('alice_secret') : keypairs.alice_secret;
-            const alicePubkey = keypairs.get ? keypairs.get('alice_pubkey') : keypairs.alice_pubkey;
-            const bobSecret = keypairs.get ? keypairs.get('bob_secret') : keypairs.bob_secret;
-            const bobPubkey = keypairs.get ? keypairs.get('bob_pubkey') : keypairs.bob_pubkey;
+            // Generate 6 keypairs (A, B, C for before locktime; D, E, F for after locktime)
+            const generateKeypair = () => {
+                const kp = generate_test_keypairs();
+                return {
+                    secret: kp.get ? kp.get('alice_secret') : kp.alice_secret,
+                    pubkey: kp.get ? kp.get('alice_pubkey') : kp.alice_pubkey,
+                };
+            };
+            const A = generateKeypair();
+            const B = generateKeypair();
+            const C = generateKeypair();
+            const D = generateKeypair();
+            const E = generateKeypair();
+            const F = generateKeypair();
 
-            // Set locktime to 10 seconds in the past
+            console.log('Generated 6 keypairs: A, B, C (pre-locktime), D, E, F (post-locktime)');
+
+            // Set locktime to 1 week in the past
             const currentTime = Math.floor(Date.now() / 1000);
-            const locktime = currentTime - 10;
-            console.log(`Using locktime: ${locktime} (10 seconds ago)`);
+            const oneWeek = 7 * 24 * 60 * 60; // 604800 seconds
+            const locktime = currentTime - oneWeek;
+            console.log(`Using locktime: ${locktime} (1 week ago)`);
 
             // Create test context
             console.log('Creating test context...');
@@ -1202,16 +1208,19 @@
                 const inputYs = inputData.ys;
                 console.log(`  Selected ${inputProofs.length} proofs totaling ${inputData.total} sat`);
 
-                // 1b. Create spending conditions with locktime and refund
-                // Before locktime: Alice can spend
-                // After locktime: Bob (refund key) can spend
-                console.log('  1b. Creating spending conditions with locktime and refund...');
-                const spendingConditions = await create_spending_conditions_with_locktime_refund(
-                    alicePubkey,  // Primary key (Alice)
-                    bobPubkey,    // Refund key (Bob)
-                    BigInt(locktime)
+                // 1b. Create spending conditions with 2-of-3 multisig before and after locktime
+                // Before locktime: 2 of (A, B, C) needed
+                // After locktime: 2 of (D, E, F) needed
+                console.log('  1b. Creating 2-of-3 multisig spending conditions...');
+                const spendingConditions = await create_spending_conditions_multisig_locktime(
+                    A.pubkey,           // Primary key (A)
+                    [B.pubkey, C.pubkey], // Additional keys before locktime (B, C)
+                    [D.pubkey, E.pubkey, F.pubkey], // Refund keys after locktime (D, E, F)
+                    BigInt(locktime),   // Locktime
+                    BigInt(2),          // 2-of-3 before locktime
+                    BigInt(2)           // 2-of-3 after locktime
                 );
-                console.log('  Created spending conditions');
+                console.log('  Created 2-of-3 multisig conditions');
 
                 // 1c. Create blinded outputs with spending conditions (1, 2 sat)
                 console.log('  1c. Creating blinded outputs with spending conditions (1, 2 sat)...');
@@ -1289,9 +1298,9 @@
 
                 await saveTestResult({
                     testId, testName, mintUrl: mint.url, timestamp,
-                    stepNumber: 1, stepName: 'Create P2PK tokens with locktime',
+                    stepNumber: 1, stepName: 'Create P2PK tokens with 2-of-3 multisig',
                     expected: 'Success', actual: 'Success', state: 'Passed',
-                    details: `Created 2 P2PK tokens (1, 2 sat) with locktime ${locktime}. Alice is primary key (before locktime), Bob is refund key (after locktime). States: ${states.join(', ')}`
+                    details: `Created 2 P2PK tokens (1, 2 sat) with 2-of-3 multisig. Before locktime ${locktime}: need 2 of (A,B,C). After locktime: need 2 of (D,E,F). States: ${states.join(', ')}`
                 });
                 await loadAndRenderResults();
             } catch (err) {
@@ -1319,51 +1328,57 @@
                 return;
             }
 
-            // Step 2: Try spending with Alice (should fail - we're past locktime)
+            // Step 2: Sign with A, B, C, D (mixed pre and post locktime signatures - should fail)
             try {
-                console.log('Step 2: Trying to spend with Alice (should fail - past locktime)...');
+                console.log('Step 2: Signing with A, B, C, D (mixed - should fail)...');
 
                 // 2a. Create regular blinded outputs
                 console.log('  2a. Creating regular blinded outputs...');
                 const outputData = await create_blinded_outputs(mint.url, [BigInt(1), BigInt(2)]);
+                const regularOutputs = outputData.outputs;
+                const regularSecrets = outputData.secrets;
+                const regularFactors = outputData.blinding_factors;
                 console.log('  Created 2 regular blinded outputs');
 
                 // 2b. Create swap request
                 console.log('  2b. Creating swap request...');
-                const swapRequest = await create_swap_request(p2pkProofs, outputData.outputs);
+                const swapRequest = await create_swap_request(p2pkProofs, regularOutputs);
                 console.log('  Created swap request');
 
-                // 2c. Sign with Alice (primary key, but locktime has passed)
-                console.log('  2c. Signing with Alice (primary key)...');
-                const signedSwapRequest = await sign_swap_request_p2pk(swapRequest, [aliceSecret]);
-                console.log('  Signed with Alice');
+                // 2c. Sign with A, B, C, D (3 pre-locktime keys + 1 post-locktime key)
+                console.log('  2c. Signing with A, B, C, D...');
+                const signedSwapRequest = await sign_swap_request_p2pk(swapRequest, [A.secret, B.secret, C.secret, D.secret]);
+                console.log('  Signed with 4 keys (A, B, C from pre-locktime set, D from post-locktime set)');
 
-                // 2d. Submit (should fail - Alice is not valid after locktime)
+                // 2d. Submit (should fail - mixing signatures from different sets is invalid)
                 console.log('  2d. Submitting swap (should fail)...');
                 const result = await submit_swap_request(mint.url, signedSwapRequest);
 
                 if (result.success) {
+                    // Unblind and store if it somehow succeeded (test failed)
+                    const regularProofs = await unblind_signatures(
+                        mint.url,
+                        result.signatures,
+                        regularSecrets,
+                        regularFactors
+                    );
+                    await add_proofs_to_wallet(mint.url, mint.info.seed, regularProofs);
+                    await updateBalanceDisplay(mint.url);
+
                     await saveTestResult({
                         testId, testName, mintUrl: mint.url, timestamp,
-                        stepNumber: 2, stepName: 'Try spending with Alice (after locktime)',
+                        stepNumber: 2, stepName: 'Sign with A,B,C,D (mixed)',
                         expected: 'Reject', actual: 'Accept', state: 'Failed',
-                        details: `Swap succeeded with Alice's signature after locktime (expected to fail - only refund key should work after locktime)`
-                    });
-                    await loadAndRenderResults();
-                    // Skip remaining step since proofs are spent
-                    await saveTestResult({
-                        testId, testName, mintUrl: mint.url, timestamp,
-                        stepNumber: 3, stepName: 'Spend with Bob (refund key)',
-                        expected: 'Accept', actual: 'Skipped', state: 'Skipped'
+                        details: `Swap succeeded with mixed pre/post-locktime signatures (expected to fail). After locktime, only valid signatures should be from the refund set (D,E,F), not a mix.`
                     });
                     await loadAndRenderResults();
                     return;
                 } else {
                     await saveTestResult({
                         testId, testName, mintUrl: mint.url, timestamp,
-                        stepNumber: 2, stepName: 'Try spending with Alice (after locktime)',
+                        stepNumber: 2, stepName: 'Sign with A,B,C,D (mixed)',
                         expected: 'Reject', actual: 'Reject', state: 'Passed',
-                        details: `Correctly rejected Alice's signature after locktime. Error: ${result.error}`
+                        details: `Correctly rejected mixed pre/post-locktime signatures. After locktime, only D (1 valid post-locktime sig) out of 4 provided. Need 2 from (D,E,F). Error: ${result.error}`
                     });
                     await loadAndRenderResults();
                 }
@@ -1371,77 +1386,8 @@
                 console.error('  Step 2 error:', err);
                 await saveTestResult({
                     testId, testName, mintUrl: mint.url, timestamp,
-                    stepNumber: 2, stepName: 'Try spending with Alice (after locktime)',
+                    stepNumber: 2, stepName: 'Sign with A,B,C,D (mixed)',
                     expected: 'Reject', actual: 'Error', state: 'Failed',
-                    details: err.message || String(err)
-                });
-                await loadAndRenderResults();
-            }
-
-            // Step 3: Spend with Bob (refund key - should succeed)
-            try {
-                console.log('Step 3: Spending with Bob (refund key - should succeed)...');
-
-                // 3a. Create regular blinded outputs
-                console.log('  3a. Creating regular blinded outputs...');
-                const outputData = await create_blinded_outputs(mint.url, [BigInt(1), BigInt(2)]);
-                const regularOutputs = outputData.outputs;
-                const regularSecrets = outputData.secrets;
-                const regularFactors = outputData.blinding_factors;
-                console.log('  Created 2 regular blinded outputs');
-
-                // 3b. Create swap request
-                console.log('  3b. Creating swap request...');
-                const swapRequest = await create_swap_request(p2pkProofs, regularOutputs);
-                console.log('  Created swap request');
-
-                // 3c. Sign with Bob (refund key)
-                console.log('  3c. Signing with Bob (refund key)...');
-                const signedSwapRequest = await sign_swap_request_p2pk(swapRequest, [bobSecret]);
-                console.log('  Signed with Bob');
-
-                // 3d. Submit (should succeed)
-                console.log('  3d. Submitting swap (should succeed)...');
-                const result = await submit_swap_request(mint.url, signedSwapRequest);
-
-                if (!result.success) {
-                    throw new Error(`Swap failed: ${result.error}`);
-                }
-                console.log('  Swap successful!');
-
-                // 3e. Unblind signatures to get regular proofs
-                console.log('  3e. Unblinding signatures...');
-                const regularProofs = await unblind_signatures(
-                    mint.url,
-                    result.signatures,
-                    regularSecrets,
-                    regularFactors
-                );
-                console.log('  Got 2 regular proofs');
-
-                // 3f. Add regular proofs back to wallet
-                console.log('  3f. Adding regular proofs back to wallet...');
-                try {
-                    await add_proofs_to_wallet(mint.url, mint.info.seed, regularProofs);
-                    console.log('  Successfully added output proofs to wallet');
-                    await updateBalanceDisplay(mint.url);
-                } catch (addErr) {
-                    console.error('  Failed to add proofs to wallet:', addErr);
-                }
-
-                await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
-                    stepNumber: 3, stepName: 'Spend with Bob (refund key)',
-                    expected: 'Accept', actual: 'Accept', state: 'Passed',
-                    details: `Successfully spent P2PK tokens using Bob's refund key after locktime`
-                });
-                await loadAndRenderResults();
-            } catch (err) {
-                console.error('  Step 3 error:', err);
-                await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
-                    stepNumber: 3, stepName: 'Spend with Bob (refund key)',
-                    expected: 'Accept', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
                 });
                 await loadAndRenderResults();
