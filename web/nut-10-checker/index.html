@@ -103,6 +103,8 @@
             swap_to_p2pk_2of2,
             swap_with_p2pk,
             swap_with_sig_all,
+            sign_proofs_with_sig_all,
+            submit_signed_proofs,
             check_proofs_state,
             check_specific_proofs_state,
             add_proofs_to_wallet
@@ -832,36 +834,35 @@
             // Convert to array for individual access
             const proofsArray = Array.isArray(proofs) ? proofs : Array.from(proofs);
 
-            // Step 2: Sign swap with BOTH proofs, then try to submit only the first proof
-            // This tests that SigAll signatures are tied to the exact transaction
+            // Step 2: Sign BOTH proofs together, then try to submit only ONE with those signatures
+            // This tests that SigAll signatures commit to the exact transaction
             try {
                 console.log('Step 2: Signing both proofs together, then attempting to spend only first proof...');
 
-                // First, create a properly signed swap with BOTH proofs to get the signatures
-                const fullSwapResult = await swap_with_sig_all(
+                // Sign both proofs together with SigAll (creates signatures for 2-proof transaction)
+                const signedProofs = await sign_proofs_with_sig_all(
                     mint.url,
                     proofs,  // Both proofs
                     [aliceSecret, bobSecret]
                 );
+                console.log('Signed both proofs with SigAll. Witnesses attached.');
 
-                // Don't submit it, just use it to get the signed proofs
-                // Now the proofs have witnesses with signatures for the 2-proof transaction
+                // Convert to array
+                const signedProofsArray = Array.isArray(signedProofs) ? signedProofs : Array.from(signedProofs);
 
-                // Try to spend just the first proof with its witness (which was signed for a 2-proof tx)
-                const result = await swap_with_sig_all(
+                // Try to submit ONLY the first proof (but it has witness from 2-proof transaction!)
+                const result = await submit_signed_proofs(
                     mint.url,
-                    [proofsArray[0]],  // Only first proof
-                    [aliceSecret, bobSecret]  // This will create NEW signatures for 1-proof tx
+                    [signedProofsArray[0]]  // Only first proof with mismatched witness
                 );
 
                 if (result.success) {
-                    // This should NOT succeed - but we're creating new signatures so it might
-                    // TODO: We need to actually reuse the old signatures to properly test this
+                    // This should NOT succeed - signatures were for a different transaction
                     await saveTestResult({
                         testId, testName, mintUrl: mint.url, timestamp,
                         stepNumber: 2, stepName: 'Spend first proof with mismatched SigAll',
                         expected: 'Reject', actual: 'Accept', state: 'Failed',
-                        details: 'Mint accepted individual proof spend (SigAll should prevent this)'
+                        details: 'Mint accepted proof with signatures from different transaction!'
                     });
                 } else {
                     // Expected to fail
@@ -882,14 +883,23 @@
                 });
             }
 
-            // Step 3: Same test with second proof
+            // Step 3: Same test with second proof (reuse same signed proofs from before if still valid)
             try {
-                console.log('Step 3: Signing both proofs together, then attempting to spend only second proof...');
+                console.log('Step 3: Re-signing both proofs, then attempting to spend only second proof...');
 
-                const result = await swap_with_sig_all(
+                // Sign both proofs together again
+                const signedProofs2 = await sign_proofs_with_sig_all(
                     mint.url,
-                    [proofsArray[1]],  // Only second proof
-                    [aliceSecret, bobSecret]  // This will create NEW signatures for 1-proof tx
+                    proofs,  // Both proofs
+                    [aliceSecret, bobSecret]
+                );
+
+                const signedProofsArray2 = Array.isArray(signedProofs2) ? signedProofs2 : Array.from(signedProofs2);
+
+                // Try to submit ONLY the second proof (but it has witness from 2-proof transaction!)
+                const result = await submit_signed_proofs(
+                    mint.url,
+                    [signedProofsArray2[1]]  // Only second proof with mismatched witness
                 );
 
                 if (result.success) {
@@ -897,7 +907,7 @@
                         testId, testName, mintUrl: mint.url, timestamp,
                         stepNumber: 3, stepName: 'Spend second proof with mismatched SigAll',
                         expected: 'Reject', actual: 'Accept', state: 'Failed',
-                        details: 'Mint accepted individual proof spend (SigAll should prevent this)'
+                        details: 'Mint accepted proof with signatures from different transaction!'
                     });
                 } else {
                     // Expected to fail

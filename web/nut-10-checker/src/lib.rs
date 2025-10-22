@@ -1025,23 +1025,110 @@ pub async fn swap_with_p2pk(
     }
 }
 
-/// Submit a pre-constructed SwapRequest directly to the mint
-/// Used for testing - allows submitting already-signed proofs
+/// Sign proofs with SigAll and return the signed proofs (without submitting)
+/// Used for testing - allows examining or reusing signatures
 #[wasm_bindgen]
-pub async fn submit_swap_request(
+pub async fn sign_proofs_with_sig_all(
     mint_url: String,
-    swap_request_json: JsValue,
+    proofs_json: JsValue,
+    secret_keys: Vec<String>,
 ) -> Result<JsValue, JsValue> {
     let url: MintUrl = mint_url.parse()
         .map_err(|e| JsValue::from_str(&format!("Invalid mint URL: {:?}", e)))?;
 
-    // Deserialize the swap request
-    let swap_request: SwapRequest = serde_wasm_bindgen::from_value(swap_request_json)
-        .map_err(|e| JsValue::from_str(&format!("Failed to parse SwapRequest: {:?}", e)))?;
+    // Deserialize proofs
+    let proofs: Proofs = serde_wasm_bindgen::from_value(proofs_json)
+        .map_err(|e| JsValue::from_str(&format!("Failed to parse proofs: {:?}", e)))?;
 
-    let http_client = HttpClient::new(url);
+    // Parse secret keys
+    let secrets: Result<Vec<SecretKey>, _> = secret_keys
+        .iter()
+        .map(|s| SecretKey::from_str(s))
+        .collect();
+    let secrets = secrets
+        .map_err(|e| JsValue::from_str(&format!("Invalid secret key: {:?}", e)))?;
 
-    // Submit the pre-signed swap request
+    // Get active keyset to create dummy outputs
+    let http_client = HttpClient::new(url.clone());
+    let keysets = http_client.get_mint_keysets().await
+        .map_err(|e| JsValue::from_str(&format!("Failed to get keysets: {:?}", e)))?;
+    let active_keyset_id = keysets.keysets.iter()
+        .find(|k| k.active)
+        .ok_or_else(|| JsValue::from_str("No active keyset found"))?
+        .id;
+
+    // Create dummy blinded outputs (we need these to create a valid SwapRequest)
+    let mut outputs = Vec::new();
+    for proof in &proofs {
+        let secret = Secret::generate();
+        let (blinded_point, _) = blind_message(&secret.to_bytes(), None)
+            .map_err(|e| JsValue::from_str(&format!("Failed to blind message: {:?}", e)))?;
+
+        outputs.push(BlindedMessage::new(
+            proof.amount,
+            active_keyset_id,
+            blinded_point,
+        ));
+    }
+
+    // Create swap request
+    let mut swap_request = SwapRequest::new(proofs, outputs);
+
+    // Sign with SigAll - all signatures go in first proof's witness
+    for secret in secrets {
+        swap_request.sign_sig_all(secret)
+            .map_err(|e| JsValue::from_str(&format!("Failed to sign with SigAll: {:?}", e)))?;
+    }
+
+    // Return the signed proofs (inputs from the swap request)
+    let signed_proofs = swap_request.inputs().clone();
+    Ok(serde_wasm_bindgen::to_value(&signed_proofs)?)
+}
+
+/// Create and submit a SwapRequest from already-signed proofs
+/// Used for testing SigAll - allows submitting a subset of proofs with mismatched signatures
+#[wasm_bindgen]
+pub async fn submit_signed_proofs(
+    mint_url: String,
+    signed_proofs_json: JsValue,
+) -> Result<JsValue, JsValue> {
+    let url: MintUrl = mint_url.parse()
+        .map_err(|e| JsValue::from_str(&format!("Invalid mint URL: {:?}", e)))?;
+
+    // Deserialize the signed proofs
+    let signed_proofs: Proofs = serde_wasm_bindgen::from_value(signed_proofs_json)
+        .map_err(|e| JsValue::from_str(&format!("Failed to parse signed proofs: {:?}", e)))?;
+
+    let http_client = HttpClient::new(url.clone());
+
+    // Get active keyset to create outputs
+    let keysets = http_client.get_mint_keysets().await
+        .map_err(|e| JsValue::from_str(&format!("Failed to get keysets: {:?}", e)))?;
+    let active_keyset_id = keysets.keysets.iter()
+        .find(|k| k.active)
+        .ok_or_else(|| JsValue::from_str("No active keyset found"))?
+        .id;
+
+    // Create blinded outputs for the proofs we're submitting
+    let mut outputs = Vec::new();
+    for proof in &signed_proofs {
+        let secret = Secret::generate();
+        let (blinded_point, _) = blind_message(&secret.to_bytes(), None)
+            .map_err(|e| JsValue::from_str(&format!("Failed to blind message: {:?}", e)))?;
+
+        outputs.push(BlindedMessage::new(
+            proof.amount,
+            active_keyset_id,
+            blinded_point,
+        ));
+    }
+
+    // Create swap request with the already-signed proofs
+    let swap_request = SwapRequest::new(signed_proofs, outputs);
+
+    web_sys::console::log_1(&format!("Submitting swap with {} signed proofs", swap_request.inputs().len()).into());
+
+    // Submit the swap request
     match http_client.post_swap(swap_request).await {
         Ok(_swap_response) => {
             Ok(serde_wasm_bindgen::to_value(&SwapResult {
