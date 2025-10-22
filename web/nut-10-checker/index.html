@@ -65,6 +65,10 @@
                     <input type="checkbox" id="test-p2pk-individual">
                     P2PK 2-of-2 Multisig - individual proofs
                 </label>
+                <label>
+                    <input type="checkbox" id="test-p2pk-sigall">
+                    P2PK 2-of-2 Multisig SIGALL
+                </label>
             </div>
             <button id="run-tests-btn" class="primary">Run Tests</button>
         </section>
@@ -210,8 +214,9 @@
         async function runTests() {
             const testP2PK = document.getElementById('test-p2pk').checked;
             const testP2PKIndividual = document.getElementById('test-p2pk-individual').checked;
+            const testP2PKSigAll = document.getElementById('test-p2pk-sigall').checked;
 
-            if (!testP2PK && !testP2PKIndividual) {
+            if (!testP2PK && !testP2PKIndividual && !testP2PKSigAll) {
                 alert('Please check at least one test to run');
                 return;
             }
@@ -236,6 +241,13 @@
                 const testId = `test-${Date.now()}`;
                 const timestamp = Date.now();
                 await runP2PK2of2IndividualTest(activeMint, testId, timestamp);
+            }
+
+            // Run P2PK 2-of-2 SigAll test
+            if (testP2PKSigAll) {
+                const testId = `test-${Date.now()}`;
+                const timestamp = Date.now();
+                await runP2PK2of2SigAllTest(activeMint, testId, timestamp);
             }
 
             await loadAndRenderResults();
@@ -705,6 +717,128 @@
                 await saveTestResult({
                     testId, testName, mintUrl: mint.url, timestamp,
                     stepNumber: 3, stepName: 'Sign and spend 2 sat proof',
+                    expected: 'Accept', actual: 'Error', state: 'Failed',
+                    details: err.message || String(err)
+                });
+            }
+        }
+
+        async function runP2PK2of2SigAllTest(mint, testId, timestamp) {
+            const testName = 'P2PK 2-of-2 Multisig SIGALL';
+            console.log(`Starting test: ${testName}`);
+
+            // Step 0: Get mint denominations
+            console.log('Step 0: Getting mint denominations...');
+            const denominations = await get_mint_denominations(mint.url);
+            console.log('Mint denominations:', denominations);
+
+            // Check wallet balance first
+            const balance = await get_wallet_balance(mint.url, mint.info.seed);
+            console.log('Current wallet balance:', balance, 'sat');
+
+            if (balance < 3) {
+                console.error('Insufficient balance for test');
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 1, stepName: 'Swap tokens for P2PK',
+                    expected: 'Success', actual: 'Insufficient balance',
+                    state: 'Failed',
+                    details: `Need at least 3 sat, have ${balance} sat. Please mint tokens first.`
+                });
+                // Skip remaining step
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 2, stepName: 'Spend with both signatures',
+                    expected: 'Accept', actual: 'Skipped', state: 'Skipped'
+                });
+                return;
+            }
+
+            // Generate test keypairs
+            const keypairs = generate_test_keypairs();
+            const aliceSecret = keypairs.get ? keypairs.get('alice_secret') : keypairs.alice_secret;
+            const alicePubkey = keypairs.get ? keypairs.get('alice_pubkey') : keypairs.alice_pubkey;
+            const bobSecret = keypairs.get ? keypairs.get('bob_secret') : keypairs.bob_secret;
+            const bobPubkey = keypairs.get ? keypairs.get('bob_pubkey') : keypairs.bob_pubkey;
+
+            // Step 1: Swap existing tokens for P2PK 2-of-2 tokens with SigAll
+            let proofs;
+            try {
+                console.log(`Step 1: Swapping for P2PK 2-of-2 tokens with SigAll (1, 2 sat)...`);
+
+                const denominationsArray = Array.isArray(denominations) ? denominations : Array.from(denominations);
+
+                proofs = await swap_to_p2pk_2of2(
+                    mint.url,
+                    mint.info.seed,
+                    alicePubkey,
+                    bobPubkey,
+                    denominationsArray
+                );
+                console.log('Swapped to P2PK proofs:', proofs);
+
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 1, stepName: 'Swap tokens for P2PK',
+                    expected: 'Success', actual: 'Success', state: 'Passed',
+                    details: 'Swapped for 2 P2PK 2-of-2 tokens with SigAll (1, 2 sat)'
+                });
+            } catch (err) {
+                console.error('Failed to swap for P2PK tokens:', err);
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 1, stepName: 'Swap tokens for P2PK',
+                    expected: 'Success', actual: 'Error', state: 'Failed',
+                    details: err.message || String(err)
+                });
+                // Skip remaining step
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 2, stepName: 'Spend with both signatures',
+                    expected: 'Accept', actual: 'Skipped', state: 'Skipped'
+                });
+                return;
+            }
+
+            // Step 2: Spend both proofs with both signatures (SigAll commits to all inputs + outputs)
+            try {
+                const result = await swap_with_signatures(
+                    mint.url,
+                    proofs,
+                    [aliceSecret, bobSecret]
+                );
+
+                if (result.success) {
+                    // Store output proofs back to wallet
+                    if (result.proofs && result.proofs.length > 0) {
+                        console.log('Step 2: Adding output proofs back to wallet:', result.proofs);
+                        try {
+                            await add_proofs_to_wallet(mint.url, mint.info.seed, result.proofs);
+                            console.log('Successfully added output proofs to wallet');
+                            await updateBalanceDisplay(mint.url);
+                        } catch (addErr) {
+                            console.error('Failed to add proofs to wallet:', addErr);
+                        }
+                    }
+
+                    await saveTestResult({
+                        testId, testName, mintUrl: mint.url, timestamp,
+                        stepNumber: 2, stepName: 'Spend with both signatures',
+                        expected: 'Accept', actual: 'Accept', state: 'Passed',
+                        details: 'Successfully spent both proofs with SigAll signatures'
+                    });
+                } else {
+                    await saveTestResult({
+                        testId, testName, mintUrl: mint.url, timestamp,
+                        stepNumber: 2, stepName: 'Spend with both signatures',
+                        expected: 'Accept', actual: 'Reject', state: 'Failed',
+                        details: `Swap rejected: ${result.error}`
+                    });
+                }
+            } catch (err) {
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 2, stepName: 'Spend with both signatures',
                     expected: 'Accept', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
                 });
