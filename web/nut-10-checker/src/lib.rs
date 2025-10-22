@@ -434,7 +434,7 @@ pub async fn check_mint_quote_status(
     Ok(matches!(response.state, cdk::nuts::MintQuoteState::Paid | cdk::nuts::MintQuoteState::Issued))
 }
 
-/// Swap existing tokens for P2PK 2-of-2 multisig tokens (creates 1, 2, 4 sat proofs)
+/// Swap existing tokens for P2PK 2-of-2 multisig tokens (creates 1, 2 sat proofs)
 #[wasm_bindgen]
 pub async fn swap_to_p2pk_2of2(
     mint_url: String,
@@ -442,6 +442,7 @@ pub async fn swap_to_p2pk_2of2(
     alice_pubkey: String,
     bob_pubkey: String,
     denominations: JsValue,
+    use_sig_all: bool,
 ) -> Result<JsValue, JsValue> {
     // Convert JsValue to Vec<u64>
     let denominations: Vec<u64> = serde_wasm_bindgen::from_value(denominations)
@@ -481,12 +482,18 @@ pub async fn swap_to_p2pk_2of2(
         .map_err(|e| JsValue::from_str(&format!("Invalid Bob pubkey: {:?}", e)))?;
 
     // Create 2-of-2 multisig spending conditions (no locktime for testing)
+    let sig_flag = if use_sig_all {
+        Some(SigFlag::SigAll)
+    } else {
+        None
+    };
+
     let conditions = Conditions::new(
         None,                           // No locktime
         Some(vec![bob_pk]),            // Additional pubkey (Bob)
         None,                           // No refund keys
         Some(2),                        // Require 2 signatures
-        Some(SigFlag::SigAll),         // SigAll flag
+        sig_flag,                       // SigAll flag (optional based on parameter)
         None,                           // No refund num_sigs
     ).map_err(|e| JsValue::from_str(&format!("Failed to create conditions: {:?}", e)))?;
 
@@ -788,9 +795,9 @@ pub async fn check_proofs_state(
     }))?)
 }
 
-/// Attempt to swap (spend) proofs with specific signatures
+/// Attempt to swap (spend) proofs with SigAll signatures
 #[wasm_bindgen]
-pub async fn swap_with_signatures(
+pub async fn swap_with_sig_all(
     mint_url: String,
     proofs_json: JsValue,
     secret_keys: Vec<String>,
@@ -839,10 +846,107 @@ pub async fn swap_with_signatures(
     // Create swap request
     let mut swap_request = SwapRequest::new(proofs, outputs);
 
-    // Sign with each provided secret key
+    // Sign with SigAll - all signatures go in first proof's witness
     for secret in secrets {
         swap_request.sign_sig_all(secret)
-            .map_err(|e| JsValue::from_str(&format!("Failed to sign: {:?}", e)))?;
+            .map_err(|e| JsValue::from_str(&format!("Failed to sign with SigAll: {:?}", e)))?;
+    }
+
+    // Submit swap request to mint
+    match http_client.post_swap(swap_request).await {
+        Ok(swap_response) => {
+            // Get mint keys to unblind the response
+            let all_keys = http_client.get_mint_keys().await
+                .map_err(|e| JsValue::from_str(&format!("Failed to get mint keys: {:?}", e)))?;
+            let mint_keys = all_keys.iter()
+                .find(|k| k.id == active_keyset_id)
+                .ok_or_else(|| JsValue::from_str("Keyset not found"))?;
+
+            // Unblind signatures to create output proofs
+            let secrets: Vec<Secret> = secrets_and_factors.iter().map(|(s, _)| s.clone()).collect();
+            let factors = secrets_and_factors.iter().map(|(_, f)| f.clone()).collect();
+
+            let output_proofs = construct_proofs(
+                swap_response.signatures,
+                factors,
+                secrets,
+                &mint_keys.keys,
+            )
+            .map_err(|e| JsValue::from_str(&format!("Failed to construct proofs: {:?}", e)))?;
+
+            Ok(serde_wasm_bindgen::to_value(&SwapResult {
+                success: true,
+                error: None,
+                proofs: Some(output_proofs),
+            })?)
+        }
+        Err(e) => {
+            Ok(serde_wasm_bindgen::to_value(&SwapResult {
+                success: false,
+                error: Some(format!("{:?}", e)),
+                proofs: None,
+            })?)
+        }
+    }
+}
+
+/// Attempt to swap (spend) proofs with individual P2PK signatures
+#[wasm_bindgen]
+pub async fn swap_with_p2pk(
+    mint_url: String,
+    proofs_json: JsValue,
+    secret_keys: Vec<String>,
+) -> Result<JsValue, JsValue> {
+    let url: MintUrl = mint_url.parse()
+        .map_err(|e| JsValue::from_str(&format!("Invalid mint URL: {:?}", e)))?;
+
+    // Deserialize proofs
+    let proofs: Proofs = serde_wasm_bindgen::from_value(proofs_json)
+        .map_err(|e| JsValue::from_str(&format!("Failed to parse proofs: {:?}", e)))?;
+
+    // Parse secret keys
+    let secrets: Result<Vec<SecretKey>, _> = secret_keys
+        .iter()
+        .map(|s| SecretKey::from_str(s))
+        .collect();
+    let secrets = secrets
+        .map_err(|e| JsValue::from_str(&format!("Invalid secret key: {:?}", e)))?;
+
+    // Get active keyset
+    let http_client = HttpClient::new(url.clone());
+    let keysets = http_client.get_mint_keysets().await
+        .map_err(|e| JsValue::from_str(&format!("Failed to get keysets: {:?}", e)))?;
+    let active_keyset_id = keysets.keysets.iter()
+        .find(|k| k.active)
+        .ok_or_else(|| JsValue::from_str("No active keyset found"))?
+        .id;
+
+    // Create blinded outputs (no spending conditions)
+    let mut outputs = Vec::new();
+    let mut secrets_and_factors = Vec::new();
+
+    for proof in &proofs {
+        let secret = Secret::generate();
+        let (blinded_point, blinding_factor) = blind_message(&secret.to_bytes(), None)
+            .map_err(|e| JsValue::from_str(&format!("Failed to blind message: {:?}", e)))?;
+
+        outputs.push(BlindedMessage::new(
+            proof.amount,
+            active_keyset_id,
+            blinded_point,
+        ));
+        secrets_and_factors.push((secret, blinding_factor));
+    }
+
+    // Create swap request
+    let mut swap_request = SwapRequest::new(proofs, outputs);
+
+    // Sign each proof individually with P2PK (not SigAll)
+    for secret in &secrets {
+        for proof in swap_request.inputs_mut() {
+            proof.sign_p2pk(secret.clone())
+                .map_err(|e| JsValue::from_str(&format!("Failed to sign with P2PK: {:?}", e)))?;
+        }
     }
 
     // Submit swap request to mint
