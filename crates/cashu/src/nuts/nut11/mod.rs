@@ -878,7 +878,7 @@ impl From<Tag> for Vec<String> {
 impl SwapRequest {
     /// Generate the message to sign for SIG_ALL validation
     /// Concatenates all input secrets and output blinded messages in order
-    fn sig_all_msg_to_sign(&self) -> String {
+    pub fn sig_all_msg_to_sign(&self) -> String {
         let mut msg_to_sign = String::new();
 
         // Add all input secrets in order
@@ -1057,7 +1057,7 @@ impl SwapRequest {
 impl<Q: std::fmt::Display + Serialize + DeserializeOwned> MeltRequest<Q> {
     /// Generate the message to sign for SIG_ALL validation
     /// Concatenates all input secrets, blank outputs, and quote ID in order
-    fn sig_all_msg_to_sign(&self) -> String {
+    pub fn sig_all_msg_to_sign(&self) -> String {
         let mut msg_to_sign = String::new();
 
         // Add all input secrets in order
