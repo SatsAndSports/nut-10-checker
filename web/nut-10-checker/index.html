@@ -104,6 +104,7 @@
             swap_with_p2pk,
             swap_with_sig_all,
             check_proofs_state,
+            check_specific_proofs_state,
             add_proofs_to_wallet
         } from './pkg/nut_10_checker.js';
         import {
@@ -791,11 +792,15 @@
                 );
                 console.log('Swapped to P2PK proofs:', proofs);
 
+                // Check state of the created proofs
+                const states = await check_specific_proofs_state(mint.url, proofs);
+                console.log('Step 1: Proof states from mint:', states);
+
                 await saveTestResult({
                     testId, testName, mintUrl: mint.url, timestamp,
                     stepNumber: 1, stepName: 'Swap tokens for P2PK',
                     expected: 'Success', actual: 'Success', state: 'Passed',
-                    details: 'Swapped for 2 P2PK 2-of-2 tokens with SigAll (1, 2 sat)'
+                    details: `Swapped for 2 P2PK 2-of-2 tokens with SigAll (1, 2 sat). States: ${states.join(', ')}`
                 });
             } catch (err) {
                 console.error('Failed to swap for P2PK tokens:', err);

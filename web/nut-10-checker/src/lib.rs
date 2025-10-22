@@ -704,6 +704,44 @@ pub async fn add_proofs_to_wallet(
     Ok(())
 }
 
+/// Check specific proofs' states from the mint (without updating local storage)
+#[wasm_bindgen]
+pub async fn check_specific_proofs_state(
+    mint_url: String,
+    proofs_json: JsValue,
+) -> Result<JsValue, JsValue> {
+    use cdk::nuts::{CheckStateRequest, CheckStateResponse};
+
+    let url: MintUrl = mint_url.parse()
+        .map_err(|e| JsValue::from_str(&format!("Invalid mint URL: {:?}", e)))?;
+
+    // Deserialize proofs
+    let proofs: Proofs = serde_wasm_bindgen::from_value(proofs_json)
+        .map_err(|e| JsValue::from_str(&format!("Failed to parse proofs: {:?}", e)))?;
+
+    let http_client = HttpClient::new(url);
+
+    // Extract Y values to check with mint
+    let ys: Vec<_> = proofs.iter()
+        .map(|p| p.y())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| JsValue::from_str(&format!("Failed to get Y from proof: {:?}", e)))?;
+
+    web_sys::console::log_1(&format!("Checking state of {} specific proofs with mint", ys.len()).into());
+
+    // Query mint for proof states
+    let request = CheckStateRequest { ys };
+    let response: CheckStateResponse = http_client.post_check_state(request).await
+        .map_err(|e| JsValue::from_str(&format!("Failed to check proof states: {:?}", e)))?;
+
+    // Return states as array of strings
+    let states: Vec<String> = response.states.iter()
+        .map(|s| format!("{:?}", s.state))
+        .collect();
+
+    Ok(serde_wasm_bindgen::to_value(&states)?)
+}
+
 /// Check proof states from the mint and update local storage
 #[wasm_bindgen]
 pub async fn check_proofs_state(
