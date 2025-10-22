@@ -53,7 +53,7 @@
                     P2PK 2-of-2 Multisig
                 </label>
                 <label>
-                    <input type="checkbox" id="test-sigall" checked>
+                    <input type="checkbox" id="test-sigall">
                     SigAll Transaction Integrity
                 </label>
                 <label>
@@ -88,7 +88,10 @@
             create_mint_quote,
             check_mint_quote_status,
             mint_tokens,
-            get_wallet_balance
+            get_wallet_balance,
+            get_mint_denominations,
+            swap_to_p2pk_2of2,
+            swap_with_signatures
         } from './pkg/nut_10_checker.js';
         import {
             initDB,
@@ -99,6 +102,7 @@
             getActiveMint,
             deleteMint,
             saveTestResult,
+            getTestResults,
             clearTestResults,
             exportResults,
             loadAndRenderMints,
@@ -205,22 +209,292 @@
                 return;
             }
 
-            const mints = await getMints();
-            if (mints.length === 0) {
-                alert('Please add at least one mint first');
+            const activeMint = await getActiveMint();
+            if (!activeMint) {
+                alert('Please add a mint and set it as active first');
                 return;
             }
 
-            console.log('Running tests:', { testP2PK, testSigAll, testHTLC });
+            console.log('Running tests on mint:', activeMint.url);
+
+            // Generate unique test ID
+            const testId = `test-${Date.now()}`;
+            const timestamp = Date.now();
+
+            // Run P2PK 2-of-2 test
+            if (testP2PK) {
+                await runP2PK2of2Test(activeMint, testId, timestamp);
+            }
+
+            // Future: SigAll and HTLC tests
+            if (testSigAll) {
+                console.log('SigAll test not implemented yet');
+            }
+            if (testHTLC) {
+                console.log('HTLC test not implemented yet');
+            }
+
+            await loadAndRenderResults();
+        }
+
+        async function runP2PK2of2Test(mint, testId, timestamp) {
+            const testName = 'P2PK 2-of-2 Multisig';
+            console.log(`Starting test: ${testName}`);
+
+            // Step 0: Get mint denominations
+            console.log('Step 0: Getting mint denominations...');
+            const denominations = await get_mint_denominations(mint.url);
+            console.log('Mint denominations:', denominations);
+
+            // Check wallet balance first
+            const balance = await get_wallet_balance(mint.url, mint.info.seed);
+            console.log('Current wallet balance:', balance, 'sat');
+
+            if (balance < 7) {
+                console.error('Insufficient balance for test');
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 1, stepName: 'Swap tokens for P2PK',
+                    expected: 'Success', actual: 'Insufficient balance',
+                    state: 'Failed',
+                    details: `Need at least 7 sat, have ${balance} sat. Please mint tokens first.`
+                });
+                // Skip remaining steps
+                for (let i = 2; i <= 4; i++) {
+                    const stepNames = ['', '', 'Sign with Alice only', 'Sign with Bob only', 'Sign with both Alice and Bob'];
+                    await saveTestResult({
+                        testId, testName, mintUrl: mint.url, timestamp,
+                        stepNumber: i, stepName: stepNames[i],
+                        expected: i === 4 ? 'Accept' : 'Reject',
+                        actual: 'Skipped', state: 'Skipped'
+                    });
+                }
+                return;
+            }
 
             // Generate test keypairs
             const keypairs = generate_test_keypairs();
             console.log('Generated keypairs:', keypairs);
 
-            // TODO: Implement actual test execution
-            alert('Test execution coming soon! Check console for keypairs.');
+            // WASM returns a Map, not a plain object
+            const aliceSecret = keypairs.get ? keypairs.get('alice_secret') : keypairs.alice_secret;
+            const alicePubkey = keypairs.get ? keypairs.get('alice_pubkey') : keypairs.alice_pubkey;
+            const bobSecret = keypairs.get ? keypairs.get('bob_secret') : keypairs.bob_secret;
+            const bobPubkey = keypairs.get ? keypairs.get('bob_pubkey') : keypairs.bob_pubkey;
 
-            await loadAndRenderResults();
+            console.log('Extracted keypairs:');
+            console.log('  Alice secret:', aliceSecret);
+            console.log('  Alice pubkey:', alicePubkey);
+            console.log('  Bob secret:', bobSecret);
+            console.log('  Bob pubkey:', bobPubkey);
+
+            // Step 1: Swap existing tokens for P2PK 2-of-2 tokens
+            let proofs;
+            try {
+                console.log(`Step 1: Swapping for P2PK 2-of-2 tokens (1, 2, 4 sat)...`);
+                console.log('Mint URL:', mint.url);
+                console.log('Alice pubkey:', alicePubkey);
+                console.log('Bob pubkey:', bobPubkey);
+
+                // Convert denominations to array if it's a Map/other type
+                const denominationsArray = Array.isArray(denominations) ? denominations : Array.from(denominations);
+                console.log('Denominations array:', denominationsArray);
+
+                // Use the new function to swap tokens for P2PK
+                proofs = await swap_to_p2pk_2of2(
+                    mint.url,
+                    mint.info.seed,
+                    alicePubkey,
+                    bobPubkey,
+                    denominationsArray
+                );
+                console.log('Swapped to P2PK proofs:', proofs);
+
+                await saveTestResult({
+                    testId,
+                    testName,
+                    mintUrl: mint.url,
+                    timestamp,
+                    stepNumber: 1,
+                    stepName: 'Swap tokens for P2PK',
+                    expected: 'Success',
+                    actual: 'Success',
+                    state: 'Passed',
+                    details: 'Swapped for 3 P2PK 2-of-2 tokens (1, 2, 4 sat)'
+                });
+            } catch (err) {
+                console.error('Failed to swap for P2PK tokens:', err);
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 1, stepName: 'Swap tokens for P2PK',
+                    expected: 'Success', actual: 'Error', state: 'Failed',
+                    details: err.message || String(err)
+                });
+                // Skip remaining steps
+                for (let i = 2; i <= 4; i++) {
+                    const stepNames = ['', '', 'Sign with Alice only', 'Sign with Bob only', 'Sign with both Alice and Bob'];
+                    await saveTestResult({
+                        testId, testName, mintUrl: mint.url, timestamp,
+                        stepNumber: i, stepName: stepNames[i],
+                        expected: i === 4 ? 'Accept' : 'Reject',
+                        actual: 'Skipped', state: 'Skipped'
+                    });
+                }
+                return;
+            }
+
+            // Step 2: Try to swap with Alice's signature only (should reject)
+            try {
+                const result = await swap_with_signatures(
+                    mint.url,
+                    proofs,
+                    [aliceSecret]
+                );
+
+                if (result.success) {
+                    await saveTestResult({
+                        testId, testName, mintUrl: mint.url, timestamp,
+                        stepNumber: 2, stepName: 'Sign with Alice only',
+                        expected: 'Reject', actual: 'Accept', state: 'Failed',
+                        details: 'Swap succeeded with only 1 signature (expected to fail)'
+                    });
+                    // Skip remaining since proofs are spent
+                    await saveTestResult({
+                        testId, testName, mintUrl: mint.url, timestamp,
+                        stepNumber: 3, stepName: 'Sign with Bob only',
+                        expected: 'Reject', actual: 'Skipped', state: 'Skipped'
+                    });
+                    await saveTestResult({
+                        testId, testName, mintUrl: mint.url, timestamp,
+                        stepNumber: 4, stepName: 'Sign with both Alice and Bob',
+                        expected: 'Accept', actual: 'Skipped', state: 'Skipped'
+                    });
+                    return;
+                } else {
+                    await saveTestResult({
+                        testId, testName, mintUrl: mint.url, timestamp,
+                        stepNumber: 2, stepName: 'Sign with Alice only',
+                        expected: 'Reject', actual: 'Reject', state: 'Passed',
+                        details: `Correctly rejected: ${result.error}`
+                    });
+                }
+            } catch (err) {
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 2, stepName: 'Sign with Alice only',
+                    expected: 'Reject', actual: 'Error', state: 'Failed',
+                    details: err.message || String(err)
+                });
+                // Skip remaining
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 3, stepName: 'Sign with Bob only',
+                    expected: 'Reject', actual: 'Skipped', state: 'Skipped'
+                });
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 4, stepName: 'Sign with both Alice and Bob',
+                    expected: 'Accept', actual: 'Skipped', state: 'Skipped'
+                });
+                return;
+            }
+
+            // Step 3: Try to swap with Bob's signature only (should reject)
+            try {
+                const result = await swap_with_signatures(
+                    mint.url,
+                    proofs,
+                    [bobSecret]
+                );
+
+                if (result.success) {
+                    await saveTestResult({
+                        testId, testName, mintUrl: mint.url, timestamp,
+                        stepNumber: 3, stepName: 'Sign with Bob only',
+                        expected: 'Reject', actual: 'Accept', state: 'Failed',
+                        details: 'Swap succeeded with only 1 signature (expected to fail)'
+                    });
+                    // Skip remaining
+                    await saveTestResult({
+                        testId, testName, mintUrl: mint.url, timestamp,
+                        stepNumber: 4, stepName: 'Sign with both Alice and Bob',
+                        expected: 'Accept', actual: 'Skipped', state: 'Skipped'
+                    });
+                    return;
+                } else {
+                    await saveTestResult({
+                        testId, testName, mintUrl: mint.url, timestamp,
+                        stepNumber: 3, stepName: 'Sign with Bob only',
+                        expected: 'Reject', actual: 'Reject', state: 'Passed',
+                        details: `Correctly rejected: ${result.error}`
+                    });
+                }
+            } catch (err) {
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 3, stepName: 'Sign with Bob only',
+                    expected: 'Reject', actual: 'Error', state: 'Failed',
+                    details: err.message || String(err)
+                });
+                // Skip remaining
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 4, stepName: 'Sign with both Alice and Bob',
+                    expected: 'Accept', actual: 'Skipped', state: 'Skipped'
+                });
+                return;
+            }
+
+            // Step 4: Try to swap with both signatures (should succeed)
+            try {
+                const result = await swap_with_signatures(
+                    mint.url,
+                    proofs,
+                    [aliceSecret, bobSecret]
+                );
+
+                if (result.success) {
+                    await saveTestResult({
+                        testId, testName, mintUrl: mint.url, timestamp,
+                        stepNumber: 4, stepName: 'Sign with both Alice and Bob',
+                        expected: 'Accept', actual: 'Accept', state: 'Passed',
+                        details: 'Swap succeeded with both signatures'
+                    });
+                } else {
+                    await saveTestResult({
+                        testId, testName, mintUrl: mint.url, timestamp,
+                        stepNumber: 4, stepName: 'Sign with both Alice and Bob',
+                        expected: 'Accept', actual: 'Reject', state: 'Failed',
+                        details: `Swap rejected: ${result.error}`
+                    });
+                }
+            } catch (err) {
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 4, stepName: 'Sign with both Alice and Bob',
+                    expected: 'Accept', actual: 'Error', state: 'Failed',
+                    details: err.message || String(err)
+                });
+            }
+        }
+
+        async function waitForPayment(mintUrl, seed, quoteId, timeoutSeconds = 300) {
+            const maxAttempts = timeoutSeconds / 5;
+
+            for (let i = 0; i < maxAttempts; i++) {
+                try {
+                    const paid = await check_mint_quote_status(mintUrl, seed, quoteId);
+                    if (paid) {
+                        return true;
+                    }
+                } catch (err) {
+                    console.error('Error checking payment status:', err);
+                }
+
+                await new Promise(resolve => setTimeout(resolve, 5000));
+            }
+
+            return false;
         }
 
         async function handleExportResults() {

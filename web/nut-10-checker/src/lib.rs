@@ -4,14 +4,41 @@ use std::sync::Arc;
 use bip39::Mnemonic;
 
 // CDK imports
-use cdk::nuts::{SecretKey, CurrencyUnit, PublicKey, SpendingConditions, Conditions, SigFlag};
+use cdk::nuts::{SecretKey, CurrencyUnit, PublicKey, SpendingConditions, Conditions, SigFlag, SwapRequest, Proofs, BlindedMessage, Nut10Secret};
 use cdk::wallet::{HttpClient, MintConnector, WalletBuilder};
 use cdk::Amount;
 use cdk_common::mint_url::MintUrl;
+use cdk::dhke::{blind_message, construct_proofs};
+use cdk::secret::Secret;
 use std::str::FromStr;
 
 mod wallet_db;
 use wallet_db::LocalStorageWalletDatabase;
+
+/// Helper function to select denominations that sum to target
+fn select_denominations(target: u64, available: &[u64]) -> Result<Vec<u64>, String> {
+    let mut sorted = available.to_vec();
+    sorted.sort_by(|a, b| b.cmp(a)); // Sort descending (largest first)
+
+    let mut remaining = target;
+    let mut selected = Vec::new();
+
+    for &amount in &sorted {
+        while remaining >= amount {
+            selected.push(amount);
+            remaining -= amount;
+        }
+    }
+
+    if remaining > 0 {
+        return Err(format!("Cannot make {} sat from available denominations {:?}", target, available));
+    }
+
+    web_sys::console::log_1(&format!("select_denominations: target={}, available={:?}, selected={:?}",
+        target, available, selected).into());
+
+    Ok(selected)
+}
 
 #[wasm_bindgen(start)]
 pub fn main() {
@@ -21,6 +48,45 @@ pub fn main() {
 #[wasm_bindgen]
 pub fn greet(name: &str) -> String {
     format!("Hello, {}! NUT-10 Checker is ready.", name)
+}
+
+/// Get the denominations (amounts) supported by the active keyset
+#[wasm_bindgen]
+pub async fn get_mint_denominations(mint_url: String) -> Result<JsValue, JsValue> {
+    let url: MintUrl = mint_url.parse()
+        .map_err(|e| JsValue::from_str(&format!("Invalid mint URL: {:?}", e)))?;
+
+    let http_client = HttpClient::new(url);
+
+    // Get active keyset
+    let keysets = http_client.get_mint_keysets().await
+        .map_err(|e| JsValue::from_str(&format!("Failed to get keysets: {:?}", e)))?;
+    let active_keyset_id = keysets.keysets.iter()
+        .find(|k| k.active)
+        .ok_or_else(|| JsValue::from_str("No active keyset found"))?
+        .id;
+
+    // Get the keys for the active keyset
+    let all_keys = http_client.get_mint_keys().await
+        .map_err(|e| JsValue::from_str(&format!("Failed to get mint keys: {:?}", e)))?;
+    let keyset = all_keys.iter()
+        .find(|k| k.id == active_keyset_id)
+        .ok_or_else(|| JsValue::from_str("Active keyset not found in keys"))?;
+
+    // Extract amounts from the keys (BTreeMap<Amount, PublicKey>)
+    // Filter to only amounts that fit in JavaScript Number.MAX_SAFE_INTEGER (2^53 - 1)
+    const MAX_SAFE_JS_INT: u64 = 9007199254740991; // 2^53 - 1
+
+    let mut amounts: Vec<u64> = keyset.keys.iter()
+        .map(|(amt, _pubkey)| u64::from(*amt))
+        .filter(|&amt| amt <= MAX_SAFE_JS_INT)
+        .collect();
+    amounts.sort(); // Sort for consistency
+
+    web_sys::console::log_1(&format!("get_mint_denominations: keyset_id={}, amounts={:?}",
+        active_keyset_id, amounts).into());
+
+    Ok(serde_wasm_bindgen::to_value(&amounts)?)
 }
 
 /// Check if a mint supports NUT-11 (P2PK)
@@ -259,15 +325,24 @@ pub async fn check_mint_quote_status(
     Ok(matches!(response.state, cdk::nuts::MintQuoteState::Paid | cdk::nuts::MintQuoteState::Issued))
 }
 
-/// Mint tokens with P2PK spending conditions (2-of-2 multisig)
+/// Swap existing tokens for P2PK 2-of-2 multisig tokens (creates 1, 2, 4 sat proofs)
 #[wasm_bindgen]
-pub async fn mint_with_p2pk_2of2(
+pub async fn swap_to_p2pk_2of2(
     mint_url: String,
     seed_words: String,
-    quote_id: String,
     alice_pubkey: String,
     bob_pubkey: String,
+    denominations: JsValue,
 ) -> Result<JsValue, JsValue> {
+    // Convert JsValue to Vec<u64>
+    let denominations: Vec<u64> = serde_wasm_bindgen::from_value(denominations)
+        .map_err(|e| JsValue::from_str(&format!("Failed to parse denominations: {:?}", e)))?;
+    // Hardcoded: create 1, 2, 4 sat P2PK proofs (total 7 sat)
+    let p2pk_amounts = vec![1u64, 2, 4];
+    let total_p2pk: u64 = p2pk_amounts.iter().sum();
+
+    web_sys::console::log_1(&format!("swap_to_p2pk_2of2: creating P2PK proofs for {:?} (total {} sat)",
+        p2pk_amounts, total_p2pk).into());
     let url: MintUrl = mint_url.parse()
         .map_err(|e| JsValue::from_str(&format!("Invalid mint URL: {:?}", e)))?;
 
@@ -282,7 +357,7 @@ pub async fn mint_with_p2pk_2of2(
     let http_client = HttpClient::new(url.clone());
 
     let wallet = WalletBuilder::new()
-        .mint_url(url)
+        .mint_url(url.clone())
         .unit(CurrencyUnit::Sat)
         .localstore(store)
         .seed(seed)
@@ -296,7 +371,7 @@ pub async fn mint_with_p2pk_2of2(
     let bob_pk = PublicKey::from_str(&bob_pubkey)
         .map_err(|e| JsValue::from_str(&format!("Invalid Bob pubkey: {:?}", e)))?;
 
-    // Create 2-of-2 multisig spending conditions
+    // Create 2-of-2 multisig spending conditions (no locktime for testing)
     let conditions = Conditions::new(
         None,                           // No locktime
         Some(vec![bob_pk]),            // Additional pubkey (Bob)
@@ -311,11 +386,143 @@ pub async fn mint_with_p2pk_2of2(
         Some(conditions),
     );
 
-    // Mint tokens with spending conditions
-    let proofs = wallet.mint(&quote_id, Default::default(), Some(spending_conditions)).await
-        .map_err(|e| JsValue::from_str(&format!("Failed to mint: {:?}", e)))?;
+    // Get proofs from wallet
+    let all_proofs = wallet.localstore
+        .get_proofs(
+            Some(wallet.mint_url.clone()),
+            Some(wallet.unit.clone()),
+            None,
+            None,
+        )
+        .await
+        .map_err(|e| JsValue::from_str(&format!("Failed to get proofs: {:?}", e)))?;
 
-    Ok(serde_wasm_bindgen::to_value(&proofs)?)
+    // Select proofs that sum to at least total_p2pk (7 sat)
+    let mut input_proofs = Vec::new();
+    let mut input_total: u64 = 0;
+
+    for proof_info in all_proofs {
+        if input_total >= total_p2pk {
+            break;
+        }
+        input_total += u64::from(proof_info.proof.amount);
+        input_proofs.push(proof_info.proof);
+    }
+
+    if input_total < total_p2pk {
+        return Err(JsValue::from_str(&format!("Insufficient balance: have {} sat, need {} sat", input_total, total_p2pk)));
+    }
+
+    web_sys::console::log_1(&format!("Selected {} sat of inputs for {} sat of P2PK outputs (change: {} sat)",
+        input_total, total_p2pk, input_total - total_p2pk).into());
+
+    // Get active keyset
+    let http_client2 = HttpClient::new(url.clone());
+    let keysets = http_client2.get_mint_keysets().await
+        .map_err(|e| JsValue::from_str(&format!("Failed to get keysets: {:?}", e)))?;
+    let active_keyset_id = keysets.keysets.iter()
+        .find(|k| k.active)
+        .ok_or_else(|| JsValue::from_str("No active keyset found"))?
+        .id;
+
+    // Create outputs
+    let mut blinded_outputs = Vec::new();
+    let mut secrets_and_factors = Vec::new();
+
+    // 1. Create P2PK outputs (1, 2, 4 sat)
+    for &amt in &p2pk_amounts {
+        let nut10_secret: Nut10Secret = spending_conditions.clone().into();
+        let secret: Secret = nut10_secret.try_into()
+            .map_err(|e| JsValue::from_str(&format!("Failed to create secret: {:?}", e)))?;
+
+        let (blinded_point, blinding_factor) = blind_message(&secret.to_bytes(), None)
+            .map_err(|e| JsValue::from_str(&format!("Failed to blind message: {:?}", e)))?;
+
+        blinded_outputs.push(BlindedMessage::new(
+            Amount::from(amt),
+            active_keyset_id,
+            blinded_point,
+        ));
+        secrets_and_factors.push((secret, blinding_factor));
+    }
+
+    // 2. Create change outputs (if needed) - no spending conditions
+    let change_amount = input_total - total_p2pk;
+    if change_amount > 0 {
+        let change_denoms = select_denominations(change_amount, &denominations)
+            .map_err(|e| JsValue::from_str(&e))?;
+
+        web_sys::console::log_1(&format!("Creating {} change outputs: {:?}",
+            change_denoms.len(), change_denoms).into());
+
+        for amt in change_denoms {
+            let change_secret = Secret::generate();
+            let (change_blinded, change_factor) = blind_message(&change_secret.to_bytes(), None)
+                .map_err(|e| JsValue::from_str(&format!("Failed to blind change: {:?}", e)))?;
+
+            blinded_outputs.push(BlindedMessage::new(
+                Amount::from(amt),
+                active_keyset_id,
+                change_blinded,
+            ));
+            secrets_and_factors.push((change_secret, change_factor));
+        }
+    }
+
+    // Create swap request (like spillman)
+    let swap_request = SwapRequest::new(input_proofs, blinded_outputs);
+
+    // Execute swap via HTTP client
+    let swap_response = http_client2.post_swap(swap_request).await
+        .map_err(|e| JsValue::from_str(&format!("Failed to swap: {:?}", e)))?;
+
+    // Get mint keys to unblind
+    let all_keys = http_client2.get_mint_keys().await
+        .map_err(|e| JsValue::from_str(&format!("Failed to get mint keys: {:?}", e)))?;
+    let mint_keys = all_keys.iter()
+        .find(|k| k.id == active_keyset_id)
+        .ok_or_else(|| JsValue::from_str("Keyset not found"))?;
+
+    // Unblind signatures to create proofs
+    let secrets: Vec<Secret> = secrets_and_factors.iter().map(|(s, _)| s.clone()).collect();
+    let factors = secrets_and_factors.iter().map(|(_, f)| f.clone()).collect();
+
+    let all_proofs = construct_proofs(
+        swap_response.signatures,
+        factors,
+        secrets,
+        &mint_keys.keys,
+    )
+    .map_err(|e| JsValue::from_str(&format!("Failed to construct proofs: {:?}", e)))?;
+
+    web_sys::console::log_1(&format!("Unblinded {} proofs total", all_proofs.len()).into());
+
+    // Store change proofs back in wallet (everything after the first 3)
+    if all_proofs.len() > 3 {
+        let change_proofs = &all_proofs[3..];
+        web_sys::console::log_1(&format!("Storing {} change proofs back to wallet", change_proofs.len()).into());
+
+        for change_proof in change_proofs {
+            let proof_info = cdk_common::common::ProofInfo::new(
+                change_proof.clone(),
+                wallet.mint_url.clone(),
+                cdk_common::nuts::State::Unspent,
+                wallet.unit.clone(),
+            )
+            .map_err(|e| JsValue::from_str(&format!("Failed to create proof info: {:?}", e)))?;
+
+            wallet.localstore.update_proofs(vec![proof_info], vec![]).await
+                .map_err(|e| JsValue::from_str(&format!("Failed to store change: {:?}", e)))?;
+        }
+    }
+
+    // Return only the P2PK proofs (first 3)
+    let p2pk_proofs: Vec<_> = all_proofs.into_iter().take(3).collect();
+    web_sys::console::log_1(&format!("Returning {} P2PK proofs: {:?}",
+        p2pk_proofs.len(),
+        p2pk_proofs.iter().map(|p| u64::from(p.amount)).collect::<Vec<_>>()).into());
+
+    Ok(serde_wasm_bindgen::to_value(&p2pk_proofs)?)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -328,34 +535,14 @@ pub struct SwapResult {
 #[wasm_bindgen]
 pub async fn swap_with_signatures(
     mint_url: String,
-    seed_words: String,
     proofs_json: JsValue,
     secret_keys: Vec<String>,
 ) -> Result<JsValue, JsValue> {
     let url: MintUrl = mint_url.parse()
         .map_err(|e| JsValue::from_str(&format!("Invalid mint URL: {:?}", e)))?;
 
-    let mnemonic = Mnemonic::parse(&seed_words)
-        .map_err(|e| JsValue::from_str(&format!("Invalid seed: {:?}", e)))?;
-
-    let seed = mnemonic.to_seed("");
-
-    let storage_key = format!("wallet_{}", url.to_string().replace("://", "_").replace("/", "_"));
-    let store = Arc::new(LocalStorageWalletDatabase::new(&storage_key).await?);
-
-    let http_client = HttpClient::new(url.clone());
-
-    let wallet = WalletBuilder::new()
-        .mint_url(url)
-        .unit(CurrencyUnit::Sat)
-        .localstore(store)
-        .seed(seed)
-        .client(http_client)
-        .build()
-        .map_err(|e| JsValue::from_str(&format!("Failed to build wallet: {:?}", e)))?;
-
     // Deserialize proofs
-    let proofs: Vec<cdk::nuts::Proof> = serde_wasm_bindgen::from_value(proofs_json)
+    let proofs: Proofs = serde_wasm_bindgen::from_value(proofs_json)
         .map_err(|e| JsValue::from_str(&format!("Failed to parse proofs: {:?}", e)))?;
 
     // Parse secret keys
@@ -366,17 +553,40 @@ pub async fn swap_with_signatures(
     let secrets = secrets
         .map_err(|e| JsValue::from_str(&format!("Invalid secret key: {:?}", e)))?;
 
-    // Try to swap the proofs (this will attempt to sign with the provided keys)
-    let amount: u64 = proofs.iter().map(|p| u64::from(p.amount)).sum();
+    // Get active keyset
+    let http_client = HttpClient::new(url.clone());
+    let keysets = http_client.get_mint_keysets().await
+        .map_err(|e| JsValue::from_str(&format!("Failed to get keysets: {:?}", e)))?;
+    let active_keyset_id = keysets.keysets.iter()
+        .find(|k| k.active)
+        .ok_or_else(|| JsValue::from_str("No active keyset found"))?
+        .id;
 
-    // Attempt swap - this will fail if signatures are invalid
-    match wallet.swap(
-        Some(Amount::from(amount)),
-        Default::default(),
-        proofs,
-        None,  // No spending conditions on outputs
-        false, // Don't include fees for testing
-    ).await {
+    // Create blinded outputs (no spending conditions)
+    let mut outputs = Vec::new();
+    for proof in &proofs {
+        let secret = Secret::generate();
+        let (blinded_point, _blinding_factor) = blind_message(&secret.to_bytes(), None)
+            .map_err(|e| JsValue::from_str(&format!("Failed to blind message: {:?}", e)))?;
+
+        outputs.push(BlindedMessage::new(
+            proof.amount,
+            active_keyset_id,
+            blinded_point,
+        ));
+    }
+
+    // Create swap request
+    let mut swap_request = SwapRequest::new(proofs, outputs);
+
+    // Sign with each provided secret key
+    for secret in secrets {
+        swap_request.sign_sig_all(secret)
+            .map_err(|e| JsValue::from_str(&format!("Failed to sign: {:?}", e)))?;
+    }
+
+    // Submit swap request to mint
+    match http_client.post_swap(swap_request).await {
         Ok(_) => {
             Ok(serde_wasm_bindgen::to_value(&SwapResult {
                 success: true,
