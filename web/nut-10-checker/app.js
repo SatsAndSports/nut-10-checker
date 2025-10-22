@@ -126,12 +126,15 @@ async function getTestResults(filter = null) {
         request.onsuccess = () => {
             let results = request.result;
 
-            // Sort by timestamp descending, then by step number
+            // Sort by timestamp descending, then by testId ascending, then by step number ascending
             results.sort((a, b) => {
                 if (b.timestamp !== a.timestamp) {
-                    return b.timestamp - a.timestamp;
+                    return b.timestamp - a.timestamp;  // Most recent batch first
                 }
-                return a.stepNumber - b.stepNumber;
+                if (a.testId !== b.testId) {
+                    return a.testId.localeCompare(b.testId);  // Tests in order within batch
+                }
+                return a.stepNumber - b.stepNumber;  // Steps in order within test
             });
 
             // Apply filter
@@ -268,13 +271,31 @@ function renderResults(results) {
     }
 
     // Render grouped results
-    container.innerHTML = Object.values(grouped).map(test => {
+    const tests = Object.values(grouped);
+    let previousTimestamp = null;
+    let html = '';
+
+    tests.forEach(test => {
         // Determine overall status
         const hasFailed = test.steps.some(s => s.state === 'Failed');
         const allPassed = test.steps.every(s => s.state === 'Passed');
         const overallStatus = hasFailed ? 'failed' : (allPassed ? 'passed' : 'partial');
 
-        return `
+        // Check if this is the start of a new batch
+        const isNewBatch = test.timestamp !== previousTimestamp;
+
+        // Add batch header if this is a new batch
+        if (isNewBatch) {
+            html += `
+                <div class="batch-header">
+                    <div class="batch-mint">${test.mintUrl}</div>
+                    <div class="batch-time">${new Date(test.timestamp).toLocaleString()}</div>
+                </div>
+            `;
+            previousTimestamp = test.timestamp;
+        }
+
+        html += `
             <div class="test-result ${overallStatus}">
                 <div class="test-result-header">
                     <span class="test-result-title">${test.testName}</span>
@@ -283,8 +304,7 @@ function renderResults(results) {
                     </span>
                 </div>
                 <div class="test-result-details">
-                    <div>Mint: ${test.mintUrl}</div>
-                    <div>Time: ${new Date(test.timestamp).toLocaleString()}</div>
+                    <div>Test ID: ${test.testId}</div>
                     <div class="test-steps">
                         ${test.steps.map(step => {
                             const icon = step.state === 'Passed' ? '✓' :
@@ -303,7 +323,9 @@ function renderResults(results) {
                 </div>
             </div>
         `;
-    }).join('');
+    });
+
+    container.innerHTML = html;
 }
 
 async function loadAndRenderMints() {

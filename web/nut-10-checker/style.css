@@ -182,10 +182,37 @@ button.primary:hover {
     margin-bottom: 1.5rem;
 }
 
+.batch-header {
+    background: var(--card-bg);
+    padding: 1rem;
+    margin-top: 2rem;
+    margin-bottom: 0.75rem;
+    border-radius: 8px;
+    border: 2px solid var(--primary);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.batch-header:first-child {
+    margin-top: 0;
+}
+
+.batch-mint {
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.batch-time {
+    font-size: 0.9rem;
+    color: var(--text-light);
+}
+
 .test-result {
     padding: 1rem;
     border-left: 4px solid var(--border);
-    margin-bottom: 2rem;
+    margin-bottom: 0.5rem;
     background: var(--bg);
     border-radius: 4px;
     border: 1px solid var(--border);
