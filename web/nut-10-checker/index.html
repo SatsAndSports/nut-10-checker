@@ -942,56 +942,163 @@
                 // Skip remaining steps
                 await saveTestResult({
                     testId, testName, mintUrl: mint.url, timestamp,
-                    stepNumber: 2, stepName: 'Spend P2PK proofs with 2-of-2 signatures',
+                    stepNumber: 2, stepName: 'Test SigAll with swapped outputs',
+                    expected: 'Reject', actual: 'Skipped', state: 'Skipped'
+                });
+                await loadAndRenderResults();
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 3, stepName: 'Spend P2PK proofs with 2-of-2 signatures',
                     expected: 'Accept', actual: 'Skipped', state: 'Skipped'
                 });
                 await loadAndRenderResults();
                 return;
             }
 
-            // Step 2: Spend the P2PK proofs (tests 2-of-2 multisig with SigAll)
+            // Step 2: Test SigAll with swapped outputs (should fail)
             try {
-                console.log('Step 2: Spending P2PK proofs with 2-of-2 multisig...');
+                console.log('Step 2: Testing SigAll with swapped outputs (should fail)...');
 
-                // 2a. Create regular blinded outputs (no spending conditions)
-                console.log('  2a. Creating regular blinded outputs (no conditions)...');
+                // 2a. Create regular blinded outputs [1, 2]
+                console.log('  2a. Creating regular blinded outputs [1, 2]...');
+                const outputData1 = await create_blinded_outputs(mint.url, [BigInt(1), BigInt(2)]);
+                console.log('  Created 2 regular blinded outputs');
+
+                // 2b. Create swap request (P2PK inputs → regular outputs [1, 2])
+                console.log('  2b. Creating swap request (P2PK inputs → regular outputs [1, 2])...');
+                const swapRequest1 = await create_swap_request(p2pkProofs, outputData1.outputs);
+                console.log('  Created swap request');
+
+                // 2c. Sign swap request with Alice and Bob (SigAll)
+                console.log('  2c. Signing with Alice and Bob (SigAll)...');
+                const signedSwapRequest1 = await sign_swap_request_sigall(swapRequest1, [aliceSecret, bobSecret]);
+                console.log('  Signed! Signatures committed to outputs [1, 2]');
+
+                // Debug: Check if signatures are present in the signed request
+                console.log('  Debug: signedSwapRequest1 =', signedSwapRequest1);
+                console.log('  Debug: signedSwapRequest1.inputs =', signedSwapRequest1.inputs);
+                if (signedSwapRequest1.inputs && signedSwapRequest1.inputs.length > 0) {
+                    const debugFirstProof = signedSwapRequest1.inputs[0];
+                    console.log('  Debug: first input =', debugFirstProof);
+                    console.log('  Debug: first input witness =', debugFirstProof.witness);
+                    if (debugFirstProof.witness && debugFirstProof.witness.signatures) {
+                        console.log('  Debug: signatures count =', debugFirstProof.witness.signatures.length);
+                    }
+                }
+
+                // 2c2. Now swap the outputs to [2, 1] while keeping the same signatures
+                console.log('  2c2. Swapping outputs to [2, 1] (keeping same signatures)...');
+                const swappedOutputData = await create_blinded_outputs(mint.url, [BigInt(2), BigInt(1)]);
+
+                // Manually construct swap request with signed inputs but swapped outputs
+                const swapRequestWithSwappedOutputs = {
+                    inputs: signedSwapRequest1.inputs,  // Signed inputs (signatures commit to [1, 2])
+                    outputs: swappedOutputData.outputs  // But outputs are now [2, 1]
+                };
+
+                // Count signatures in the first proof's witness
+                const firstProof = swapRequestWithSwappedOutputs.inputs[0];
+                let numSignatures = 0;
+                if (firstProof.witness) {
+                    // Parse witness if it's a string
+                    const witness = typeof firstProof.witness === 'string'
+                        ? JSON.parse(firstProof.witness)
+                        : firstProof.witness;
+                    if (witness.signatures) {
+                        numSignatures = witness.signatures.length;
+                    }
+                }
+                console.log(`  First proof has ${numSignatures} signatures in witness`);
+
+                // 2d. Submit with swapped outputs (should fail)
+                console.log('  2d. Submitting swap with swapped outputs (should fail)...');
+                const resultSwapped = await submit_swap_request(mint.url, swapRequestWithSwappedOutputs);
+
+                if (resultSwapped.success) {
+                    await saveTestResult({
+                        testId, testName, mintUrl: mint.url, timestamp,
+                        stepNumber: 2, stepName: 'Test SigAll with swapped outputs',
+                        expected: 'Reject', actual: 'Accept', state: 'Failed',
+                        details: `Swap succeeded with swapped outputs (expected to fail - SigAll should commit to exact output order). First proof had ${numSignatures} signatures.`
+                    });
+                    await loadAndRenderResults();
+                } else {
+                    await saveTestResult({
+                        testId, testName, mintUrl: mint.url, timestamp,
+                        stepNumber: 2, stepName: 'Test SigAll with swapped outputs',
+                        expected: 'Reject', actual: 'Reject', state: 'Passed',
+                        details: `Correctly rejected swap with swapped outputs. First proof had ${numSignatures} signatures. Error: ${resultSwapped.error}`
+                    });
+                    await loadAndRenderResults();
+                }
+            } catch (err) {
+                console.error('  Step 2 error:', err);
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 2, stepName: 'Test SigAll with swapped outputs',
+                    expected: 'Reject', actual: 'Error', state: 'Failed',
+                    details: err.message || String(err)
+                });
+                await loadAndRenderResults();
+            }
+
+            // Step 3: Spend the P2PK proofs (tests 2-of-2 multisig with SigAll)
+            try {
+                console.log('Step 3: Spending P2PK proofs with 2-of-2 multisig...');
+
+                // 3a. Create regular blinded outputs (no spending conditions)
+                console.log('  3a. Creating regular blinded outputs (no conditions)...');
                 const regularOutputData = await create_blinded_outputs(mint.url, [BigInt(1), BigInt(2)]);
                 const regularOutputs = regularOutputData.outputs;
                 const regularSecrets = regularOutputData.secrets;
                 const regularFactors = regularOutputData.blinding_factors;
                 console.log('  Created 2 regular blinded outputs');
 
-                // 2b. Create swap request (P2PK inputs → regular outputs)
-                console.log('  2b. Creating swap request (P2PK inputs → regular outputs)...');
-                const swapRequest2 = await create_swap_request(p2pkProofs, regularOutputs);
+                // 3b. Create swap request (P2PK inputs → regular outputs)
+                console.log('  3b. Creating swap request (P2PK inputs → regular outputs)...');
+                const swapRequest3 = await create_swap_request(p2pkProofs, regularOutputs);
                 console.log('  Created swap request');
 
-                // 2c. Sign swap request with Alice and Bob (2-of-2 multisig with SigAll)
-                console.log('  2c. Signing with Alice and Bob (SigAll)...');
-                const signedSwapRequest2 = await sign_swap_request_sigall(swapRequest2, [aliceSecret, bobSecret]);
+                // 3c. Sign swap request with Alice and Bob (2-of-2 multisig with SigAll)
+                console.log('  3c. Signing with Alice and Bob (SigAll)...');
+                const signedSwapRequest3 = await sign_swap_request_sigall(swapRequest3, [aliceSecret, bobSecret]);
                 console.log('  Signed! First proof has 2 signatures, second proof has no witness');
 
-                // 2d. Submit signed swap request
-                console.log('  2d. Submitting signed swap request...');
-                const result2 = await submit_swap_request(mint.url, signedSwapRequest2);
+                // Count signatures in the first proof's witness
+                const firstProof3 = signedSwapRequest3.inputs[0];
+                let numSignatures3 = 0;
+                if (firstProof3.witness) {
+                    // Parse witness if it's a string
+                    const witness = typeof firstProof3.witness === 'string'
+                        ? JSON.parse(firstProof3.witness)
+                        : firstProof3.witness;
+                    if (witness.signatures) {
+                        numSignatures3 = witness.signatures.length;
+                    }
+                }
+                console.log(`  First proof has ${numSignatures3} signatures in witness`);
 
-                if (!result2.success) {
-                    throw new Error(`Swap failed: ${result2.error}`);
+                // 3d. Submit signed swap request
+                console.log('  3d. Submitting signed swap request...');
+                const result3 = await submit_swap_request(mint.url, signedSwapRequest3);
+
+                if (!result3.success) {
+                    throw new Error(`Swap failed: ${result3.error}`);
                 }
                 console.log('  Swap successful!');
 
-                // 2e. Unblind signatures to get regular proofs
-                console.log('  2e. Unblinding signatures...');
+                // 3e. Unblind signatures to get regular proofs
+                console.log('  3e. Unblinding signatures...');
                 const regularProofs = await unblind_signatures(
                     mint.url,
-                    result2.signatures,
+                    result3.signatures,
                     regularSecrets,
                     regularFactors
                 );
                 console.log('  Got 2 regular proofs (no spending conditions)');
 
-                // 2f. Add regular proofs back to wallet
-                console.log('  2f. Adding regular proofs back to wallet...');
+                // 3f. Add regular proofs back to wallet
+                console.log('  3f. Adding regular proofs back to wallet...');
                 try {
                     await add_proofs_to_wallet(mint.url, mint.info.seed, regularProofs);
                     console.log('  Successfully added output proofs to wallet');
@@ -1002,16 +1109,16 @@
 
                 await saveTestResult({
                     testId, testName, mintUrl: mint.url, timestamp,
-                    stepNumber: 2, stepName: 'Spend P2PK proofs with 2-of-2 signatures',
+                    stepNumber: 3, stepName: 'Spend P2PK proofs with 2-of-2 signatures',
                     expected: 'Accept', actual: 'Accept', state: 'Passed',
-                    details: 'Successfully spent P2PK proofs using 2-of-2 multisig with SigAll'
+                    details: `Successfully spent P2PK proofs using 2-of-2 multisig with SigAll. First proof had ${numSignatures3} signatures.`
                 });
                 await loadAndRenderResults();
             } catch (err) {
-                console.error('  Step 2 error:', err);
+                console.error('  Step 3 error:', err);
                 await saveTestResult({
                     testId, testName, mintUrl: mint.url, timestamp,
-                    stepNumber: 2, stepName: 'Spend P2PK proofs with 2-of-2 signatures',
+                    stepNumber: 3, stepName: 'Spend P2PK proofs with 2-of-2 signatures',
                     expected: 'Accept', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
                 });
