@@ -141,6 +141,34 @@ pub fn create_spending_conditions_p2pk_2of2(
     Ok(serde_wasm_bindgen::to_value(&spending_conditions)?)
 }
 
+/// Create spending conditions with locktime and refund key
+/// Before locktime: requires primary_pubkey signature
+/// After locktime: requires refund_pubkey signature
+#[wasm_bindgen]
+pub fn create_spending_conditions_with_locktime_refund(
+    primary_pubkey: String,
+    refund_pubkey: String,
+    locktime: u64,
+) -> Result<JsValue, JsValue> {
+    let primary_pk = PublicKey::from_str(&primary_pubkey)
+        .map_err(|e| JsValue::from_str(&format!("Invalid primary pubkey: {:?}", e)))?;
+    let refund_pk = PublicKey::from_str(&refund_pubkey)
+        .map_err(|e| JsValue::from_str(&format!("Invalid refund pubkey: {:?}", e)))?;
+
+    let conditions = Conditions::new(
+        Some(locktime),           // Locktime
+        None,                      // No additional pubkeys (only primary before locktime)
+        Some(vec![refund_pk]),    // Refund keys (can spend after locktime)
+        Some(1),                   // num_sigs: require 1 signature before locktime
+        None,                      // No SigFlag (default SigInputs)
+        Some(1),                   // num_sigs_refund: 1 signature after locktime
+    ).map_err(|e| JsValue::from_str(&format!("Failed to create conditions: {:?}", e)))?;
+
+    let spending_conditions = SpendingConditions::new_p2pk(primary_pk, Some(conditions));
+
+    Ok(serde_wasm_bindgen::to_value(&spending_conditions)?)
+}
+
 /// Create a SwapRequest from input proofs and blinded outputs (does not sign)
 #[wasm_bindgen]
 pub fn create_swap_request(
@@ -176,6 +204,33 @@ pub fn sign_swap_request_sigall(
     for secret in secrets {
         swap_request.sign_sig_all(secret)
             .map_err(|e| JsValue::from_str(&format!("Failed to sign: {:?}", e)))?;
+    }
+
+    Ok(serde_wasm_bindgen::to_value(&swap_request)?)
+}
+
+/// Sign a SwapRequest with individual P2PK signatures (not SigAll)
+#[wasm_bindgen]
+pub fn sign_swap_request_p2pk(
+    swap_request_json: JsValue,
+    secret_keys: Vec<String>,
+) -> Result<JsValue, JsValue> {
+    let mut swap_request: SwapRequest = serde_wasm_bindgen::from_value(swap_request_json)
+        .map_err(|e| JsValue::from_str(&format!("Failed to parse swap request: {:?}", e)))?;
+
+    let secrets: Result<Vec<SecretKey>, _> = secret_keys
+        .iter()
+        .map(|s| SecretKey::from_str(s))
+        .collect();
+    let secrets = secrets
+        .map_err(|e| JsValue::from_str(&format!("Invalid secret key: {:?}", e)))?;
+
+    // Sign each input proof individually
+    for secret in &secrets {
+        for proof in swap_request.inputs_mut() {
+            proof.sign_p2pk(secret.clone())
+                .map_err(|e| JsValue::from_str(&format!("Failed to sign: {:?}", e)))?;
+        }
     }
 
     Ok(serde_wasm_bindgen::to_value(&swap_request)?)

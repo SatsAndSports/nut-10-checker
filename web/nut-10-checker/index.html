@@ -69,6 +69,10 @@
                     <input type="checkbox" id="test-p2pk-sigall">
                     P2PK 2-of-2 Multisig SIGALL
                 </label>
+                <label>
+                    <input type="checkbox" id="test-p2pk-locktime-refund">
+                    P2PK Locktime + Refund
+                </label>
             </div>
             <button id="run-tests-btn" class="primary">Run Tests</button>
         </section>
@@ -112,8 +116,10 @@
             create_blinded_outputs,
             create_blinded_outputs_with_p2pk,
             create_spending_conditions_p2pk_2of2,
+            create_spending_conditions_with_locktime_refund,
             create_swap_request,
             sign_swap_request_sigall,
+            sign_swap_request_p2pk,
             submit_swap_request,
             unblind_signatures,
             // Test context
@@ -229,8 +235,9 @@
             const testP2PK = document.getElementById('test-p2pk').checked;
             const testP2PKIndividual = document.getElementById('test-p2pk-individual').checked;
             const testP2PKSigAll = document.getElementById('test-p2pk-sigall').checked;
+            const testP2PKLocktimeRefund = document.getElementById('test-p2pk-locktime-refund').checked;
 
-            if (!testP2PK && !testP2PKIndividual && !testP2PKSigAll) {
+            if (!testP2PK && !testP2PKIndividual && !testP2PKSigAll && !testP2PKLocktimeRefund) {
                 alert('Please check at least one test to run');
                 return;
             }
@@ -262,6 +269,12 @@
             if (testP2PKSigAll) {
                 const testId = `test-${Date.now()}`;
                 await runP2PK2of2SigAllTest(activeMint, testId, batchTimestamp);
+            }
+
+            // Run P2PK Locktime + Refund test
+            if (testP2PKLocktimeRefund) {
+                const testId = `test-${Date.now()}`;
+                await runP2PKLocktimeRefundTest(activeMint, testId, batchTimestamp);
             }
 
             await loadAndRenderResults();
@@ -1119,6 +1132,315 @@
                 await saveTestResult({
                     testId, testName, mintUrl: mint.url, timestamp,
                     stepNumber: 3, stepName: 'Spend P2PK proofs with 2-of-2 signatures',
+                    expected: 'Accept', actual: 'Error', state: 'Failed',
+                    details: err.message || String(err)
+                });
+                await loadAndRenderResults();
+            }
+        }
+
+        async function runP2PKLocktimeRefundTest(mint, testId, timestamp) {
+            const testName = 'P2PK Locktime + Refund';
+            console.log(`Starting test: ${testName}`);
+
+            // Check wallet balance first
+            const balance = await get_wallet_balance(mint.url, mint.info.seed);
+            console.log('Current wallet balance:', balance, 'sat');
+
+            if (balance < 3) {
+                console.error('Insufficient balance for test');
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 1, stepName: 'Create P2PK tokens with locktime',
+                    expected: 'Success', actual: 'Insufficient balance',
+                    state: 'Failed',
+                    details: `Need at least 3 sat, have ${balance} sat. Please mint tokens first.`
+                });
+                await loadAndRenderResults();
+                // Skip remaining steps
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 2, stepName: 'Try spending with Alice (before locktime)',
+                    expected: 'Reject', actual: 'Skipped', state: 'Skipped'
+                });
+                await loadAndRenderResults();
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 3, stepName: 'Spend with Bob (refund key)',
+                    expected: 'Accept', actual: 'Skipped', state: 'Skipped'
+                });
+                await loadAndRenderResults();
+                return;
+            }
+
+            // Generate test keypairs
+            const keypairs = generate_test_keypairs();
+            const aliceSecret = keypairs.get ? keypairs.get('alice_secret') : keypairs.alice_secret;
+            const alicePubkey = keypairs.get ? keypairs.get('alice_pubkey') : keypairs.alice_pubkey;
+            const bobSecret = keypairs.get ? keypairs.get('bob_secret') : keypairs.bob_secret;
+            const bobPubkey = keypairs.get ? keypairs.get('bob_pubkey') : keypairs.bob_pubkey;
+
+            // Set locktime to 10 seconds in the past
+            const currentTime = Math.floor(Date.now() / 1000);
+            const locktime = currentTime - 10;
+            console.log(`Using locktime: ${locktime} (10 seconds ago)`);
+
+            // Create test context
+            console.log('Creating test context...');
+            const ctx = await new TestContext(mint.url, mint.info.seed);
+            console.log('Test context ready');
+
+            // Step 1: Create P2PK tokens with locktime and refund key
+            let p2pkProofs;
+            try {
+                console.log(`Step 1: Creating P2PK tokens with locktime and refund...`);
+
+                // 1a. Get proofs to spend from wallet (3 sat worth)
+                console.log('  1a. Getting proofs to spend from wallet (3 sat)...');
+                const inputData = await ctx.get_proofs_to_spend(BigInt(3));
+                const inputProofs = inputData.proofs;
+                const inputYs = inputData.ys;
+                console.log(`  Selected ${inputProofs.length} proofs totaling ${inputData.total} sat`);
+
+                // 1b. Create spending conditions with locktime and refund
+                // Before locktime: Alice can spend
+                // After locktime: Bob (refund key) can spend
+                console.log('  1b. Creating spending conditions with locktime and refund...');
+                const spendingConditions = await create_spending_conditions_with_locktime_refund(
+                    alicePubkey,  // Primary key (Alice)
+                    bobPubkey,    // Refund key (Bob)
+                    BigInt(locktime)
+                );
+                console.log('  Created spending conditions');
+
+                // 1c. Create blinded outputs with spending conditions (1, 2 sat)
+                console.log('  1c. Creating blinded outputs with spending conditions (1, 2 sat)...');
+                const p2pkOutputData = await ctx.create_blinded_outputs_with_conditions(
+                    [BigInt(1), BigInt(2)],
+                    spendingConditions
+                );
+                const p2pkOutputs = p2pkOutputData.outputs;
+                const p2pkSecrets = p2pkOutputData.secrets;
+                const p2pkFactors = p2pkOutputData.blinding_factors;
+                console.log('  Created 2 P2PK blinded outputs');
+
+                // 1d. Create change outputs (if needed)
+                const changeAmount = Number(inputData.total) - 3;
+                let allOutputs = p2pkOutputs;
+                let allSecrets = p2pkSecrets;
+                let allFactors = p2pkFactors;
+
+                if (changeAmount > 0) {
+                    console.log(`  1d. Creating change outputs (${changeAmount} sat)...`);
+                    const denominations = await get_mint_denominations(mint.url);
+                    const denominationsArray = Array.isArray(denominations) ? denominations : Array.from(denominations);
+
+                    // Use simple greedy selection for change
+                    let changeAmounts = [];
+                    let remaining = changeAmount;
+                    for (const denom of denominationsArray.sort((a, b) => b - a)) {
+                        while (remaining >= denom) {
+                            changeAmounts.push(denom);
+                            remaining -= denom;
+                        }
+                    }
+                    if (remaining > 0) {
+                        throw new Error(`Cannot make ${changeAmount} sat change from available denominations`);
+                    }
+
+                    const changeOutputData = await ctx.create_blinded_outputs(changeAmounts.map(a => BigInt(a)));
+                    allOutputs = [...p2pkOutputs, ...changeOutputData.outputs];
+                    allSecrets = [...p2pkSecrets, ...changeOutputData.secrets];
+                    allFactors = [...p2pkFactors, ...changeOutputData.blinding_factors];
+                    console.log(`  Created ${changeAmounts.length} change outputs`);
+                }
+
+                // 1e. Create swap request and submit
+                console.log('  1e. Creating and submitting swap request...');
+                const swapRequest1 = await create_swap_request(inputProofs, allOutputs);
+                const result1 = await ctx.submit_swap(swapRequest1, inputYs);
+
+                if (!result1.success) {
+                    throw new Error(`Swap failed: ${result1.error}`);
+                }
+                console.log('  Swap successful!');
+
+                // 1f. Unblind signatures to get proofs
+                console.log('  1f. Unblinding signatures...');
+                const allProofs = await ctx.unblind_signatures(
+                    result1.signatures,
+                    allSecrets,
+                    allFactors
+                );
+                console.log(`  Got ${allProofs.length} proofs total`);
+
+                // 1g. Store change proofs back to wallet, keep P2PK proofs
+                p2pkProofs = allProofs.slice(0, 2);
+                if (allProofs.length > 2) {
+                    const changeProofs = allProofs.slice(2);
+                    console.log(`  1g. Storing ${changeProofs.length} change proofs back to wallet...`);
+                    await ctx.add_proofs_to_wallet(changeProofs);
+                    await updateBalanceDisplay(mint.url);
+                }
+
+                // Check state of the created P2PK proofs
+                const states = await check_specific_proofs_state(mint.url, p2pkProofs);
+                console.log('P2PK proof states:', states);
+
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 1, stepName: 'Create P2PK tokens with locktime',
+                    expected: 'Success', actual: 'Success', state: 'Passed',
+                    details: `Created 2 P2PK tokens (1, 2 sat) with locktime ${locktime}. Alice is primary key (before locktime), Bob is refund key (after locktime). States: ${states.join(', ')}`
+                });
+                await loadAndRenderResults();
+            } catch (err) {
+                console.error('Failed to create P2PK tokens:', err);
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 1, stepName: 'Create P2PK tokens with locktime',
+                    expected: 'Success', actual: 'Error', state: 'Failed',
+                    details: err.message || String(err)
+                });
+                await loadAndRenderResults();
+                // Skip remaining steps
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 2, stepName: 'Try spending with Alice (before locktime)',
+                    expected: 'Reject', actual: 'Skipped', state: 'Skipped'
+                });
+                await loadAndRenderResults();
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 3, stepName: 'Spend with Bob (refund key)',
+                    expected: 'Accept', actual: 'Skipped', state: 'Skipped'
+                });
+                await loadAndRenderResults();
+                return;
+            }
+
+            // Step 2: Try spending with Alice (should fail - we're past locktime)
+            try {
+                console.log('Step 2: Trying to spend with Alice (should fail - past locktime)...');
+
+                // 2a. Create regular blinded outputs
+                console.log('  2a. Creating regular blinded outputs...');
+                const outputData = await create_blinded_outputs(mint.url, [BigInt(1), BigInt(2)]);
+                console.log('  Created 2 regular blinded outputs');
+
+                // 2b. Create swap request
+                console.log('  2b. Creating swap request...');
+                const swapRequest = await create_swap_request(p2pkProofs, outputData.outputs);
+                console.log('  Created swap request');
+
+                // 2c. Sign with Alice (primary key, but locktime has passed)
+                console.log('  2c. Signing with Alice (primary key)...');
+                const signedSwapRequest = await sign_swap_request_p2pk(swapRequest, [aliceSecret]);
+                console.log('  Signed with Alice');
+
+                // 2d. Submit (should fail - Alice is not valid after locktime)
+                console.log('  2d. Submitting swap (should fail)...');
+                const result = await submit_swap_request(mint.url, signedSwapRequest);
+
+                if (result.success) {
+                    await saveTestResult({
+                        testId, testName, mintUrl: mint.url, timestamp,
+                        stepNumber: 2, stepName: 'Try spending with Alice (after locktime)',
+                        expected: 'Reject', actual: 'Accept', state: 'Failed',
+                        details: `Swap succeeded with Alice's signature after locktime (expected to fail - only refund key should work after locktime)`
+                    });
+                    await loadAndRenderResults();
+                    // Skip remaining step since proofs are spent
+                    await saveTestResult({
+                        testId, testName, mintUrl: mint.url, timestamp,
+                        stepNumber: 3, stepName: 'Spend with Bob (refund key)',
+                        expected: 'Accept', actual: 'Skipped', state: 'Skipped'
+                    });
+                    await loadAndRenderResults();
+                    return;
+                } else {
+                    await saveTestResult({
+                        testId, testName, mintUrl: mint.url, timestamp,
+                        stepNumber: 2, stepName: 'Try spending with Alice (after locktime)',
+                        expected: 'Reject', actual: 'Reject', state: 'Passed',
+                        details: `Correctly rejected Alice's signature after locktime. Error: ${result.error}`
+                    });
+                    await loadAndRenderResults();
+                }
+            } catch (err) {
+                console.error('  Step 2 error:', err);
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 2, stepName: 'Try spending with Alice (after locktime)',
+                    expected: 'Reject', actual: 'Error', state: 'Failed',
+                    details: err.message || String(err)
+                });
+                await loadAndRenderResults();
+            }
+
+            // Step 3: Spend with Bob (refund key - should succeed)
+            try {
+                console.log('Step 3: Spending with Bob (refund key - should succeed)...');
+
+                // 3a. Create regular blinded outputs
+                console.log('  3a. Creating regular blinded outputs...');
+                const outputData = await create_blinded_outputs(mint.url, [BigInt(1), BigInt(2)]);
+                const regularOutputs = outputData.outputs;
+                const regularSecrets = outputData.secrets;
+                const regularFactors = outputData.blinding_factors;
+                console.log('  Created 2 regular blinded outputs');
+
+                // 3b. Create swap request
+                console.log('  3b. Creating swap request...');
+                const swapRequest = await create_swap_request(p2pkProofs, regularOutputs);
+                console.log('  Created swap request');
+
+                // 3c. Sign with Bob (refund key)
+                console.log('  3c. Signing with Bob (refund key)...');
+                const signedSwapRequest = await sign_swap_request_p2pk(swapRequest, [bobSecret]);
+                console.log('  Signed with Bob');
+
+                // 3d. Submit (should succeed)
+                console.log('  3d. Submitting swap (should succeed)...');
+                const result = await submit_swap_request(mint.url, signedSwapRequest);
+
+                if (!result.success) {
+                    throw new Error(`Swap failed: ${result.error}`);
+                }
+                console.log('  Swap successful!');
+
+                // 3e. Unblind signatures to get regular proofs
+                console.log('  3e. Unblinding signatures...');
+                const regularProofs = await unblind_signatures(
+                    mint.url,
+                    result.signatures,
+                    regularSecrets,
+                    regularFactors
+                );
+                console.log('  Got 2 regular proofs');
+
+                // 3f. Add regular proofs back to wallet
+                console.log('  3f. Adding regular proofs back to wallet...');
+                try {
+                    await add_proofs_to_wallet(mint.url, mint.info.seed, regularProofs);
+                    console.log('  Successfully added output proofs to wallet');
+                    await updateBalanceDisplay(mint.url);
+                } catch (addErr) {
+                    console.error('  Failed to add proofs to wallet:', addErr);
+                }
+
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 3, stepName: 'Spend with Bob (refund key)',
+                    expected: 'Accept', actual: 'Accept', state: 'Passed',
+                    details: `Successfully spent P2PK tokens using Bob's refund key after locktime`
+                });
+                await loadAndRenderResults();
+            } catch (err) {
+                console.error('  Step 3 error:', err);
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 3, stepName: 'Spend with Bob (refund key)',
                     expected: 'Accept', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
                 });
