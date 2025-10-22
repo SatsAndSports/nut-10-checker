@@ -986,3 +986,38 @@ pub async fn swap_with_p2pk(
         }
     }
 }
+
+/// Submit a pre-constructed SwapRequest directly to the mint
+/// Used for testing - allows submitting already-signed proofs
+#[wasm_bindgen]
+pub async fn submit_swap_request(
+    mint_url: String,
+    swap_request_json: JsValue,
+) -> Result<JsValue, JsValue> {
+    let url: MintUrl = mint_url.parse()
+        .map_err(|e| JsValue::from_str(&format!("Invalid mint URL: {:?}", e)))?;
+
+    // Deserialize the swap request
+    let swap_request: SwapRequest = serde_wasm_bindgen::from_value(swap_request_json)
+        .map_err(|e| JsValue::from_str(&format!("Failed to parse SwapRequest: {:?}", e)))?;
+
+    let http_client = HttpClient::new(url);
+
+    // Submit the pre-signed swap request
+    match http_client.post_swap(swap_request).await {
+        Ok(_swap_response) => {
+            Ok(serde_wasm_bindgen::to_value(&SwapResult {
+                success: true,
+                error: None,
+                proofs: None,  // We don't return proofs since we can't unblind them
+            })?)
+        }
+        Err(e) => {
+            Ok(serde_wasm_bindgen::to_value(&SwapResult {
+                success: false,
+                error: Some(format!("{:?}", e)),
+                proofs: None,
+            })?)
+        }
+    }
+}
