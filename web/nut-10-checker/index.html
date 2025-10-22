@@ -115,7 +115,9 @@
             create_swap_request,
             sign_swap_request_sigall,
             submit_swap_request,
-            unblind_signatures
+            unblind_signatures,
+            // Test context
+            TestContext
         } from './pkg/nut_10_checker.js';
         import {
             initDB,
@@ -822,26 +824,104 @@
             const bobSecret = keypairs.get ? keypairs.get('bob_secret') : keypairs.bob_secret;
             const bobPubkey = keypairs.get ? keypairs.get('bob_pubkey') : keypairs.bob_pubkey;
 
-            // Step 1: Create P2PK 2-of-2 tokens with SigAll (using existing helper)
+            // Create test context (opens wallet DB, caches keyset and keys)
+            console.log('Creating test context...');
+            const ctx = await new TestContext(mint.url, mint.info.seed);
+            console.log('Test context ready');
+
+            // Step 1: Create P2PK 2-of-2 tokens with SigAll (broken down into substeps)
             let p2pkProofs;
             try {
                 console.log(`Step 1: Creating P2PK 2-of-2 tokens with SigAll (1, 2 sat)...`);
 
-                const denominationsArray = Array.isArray(denominations) ? denominations : Array.from(denominations);
+                // 1a. Get proofs to spend from wallet (3 sat worth)
+                console.log('  1a. Getting proofs to spend from wallet (3 sat)...');
+                const inputData = await ctx.get_proofs_to_spend(BigInt(3));
+                const inputProofs = inputData.proofs;
+                const inputYs = inputData.ys;
+                console.log(`  Selected ${inputProofs.length} proofs totaling ${inputData.total} sat`);
 
-                p2pkProofs = await swap_to_p2pk_2of2(
-                    mint.url,
-                    mint.info.seed,
+                // 1b. Create P2PK 2-of-2 spending conditions with SigAll
+                console.log('  1b. Creating P2PK 2-of-2 spending conditions with SigAll...');
+                const spendingConditions = await create_spending_conditions_p2pk_2of2(
                     alicePubkey,
                     bobPubkey,
-                    denominationsArray,
-                    true  // use_sig_all = true
+                    null  // no locktime
                 );
-                console.log('Created P2PK proofs:', p2pkProofs);
+                console.log('  Created spending conditions');
 
-                // Check state of the created proofs
+                // 1c. Create blinded outputs with P2PK conditions (1, 2 sat)
+                console.log('  1c. Creating blinded outputs with P2PK conditions (1, 2 sat)...');
+                const p2pkOutputData = await ctx.create_blinded_outputs_with_conditions(
+                    [BigInt(1), BigInt(2)],
+                    spendingConditions
+                );
+                const p2pkOutputs = p2pkOutputData.outputs;
+                const p2pkSecrets = p2pkOutputData.secrets;
+                const p2pkFactors = p2pkOutputData.blinding_factors;
+                console.log('  Created 2 P2PK blinded outputs');
+
+                // 1d. Create change outputs (if needed)
+                const changeAmount = inputData.total - 3;
+                let allOutputs = p2pkOutputs;
+                let allSecrets = p2pkSecrets;
+                let allFactors = p2pkFactors;
+
+                if (changeAmount > 0) {
+                    console.log(`  1d. Creating change outputs (${changeAmount} sat)...`);
+                    const denominationsArray = Array.isArray(denominations) ? denominations : Array.from(denominations);
+                    // Use simple greedy selection for change
+                    let changeAmounts = [];
+                    let remaining = changeAmount;
+                    for (const denom of denominationsArray.sort((a, b) => b - a)) {
+                        while (remaining >= denom) {
+                            changeAmounts.push(denom);
+                            remaining -= denom;
+                        }
+                    }
+                    if (remaining > 0) {
+                        throw new Error(`Cannot make ${changeAmount} sat change from available denominations`);
+                    }
+
+                    const changeOutputData = await ctx.create_blinded_outputs(changeAmounts.map(a => BigInt(a)));
+                    allOutputs = [...p2pkOutputs, ...changeOutputData.outputs];
+                    allSecrets = [...p2pkSecrets, ...changeOutputData.secrets];
+                    allFactors = [...p2pkFactors, ...changeOutputData.blinding_factors];
+                    console.log(`  Created ${changeAmounts.length} change outputs`);
+                }
+
+                // 1e. Create and submit swap request
+                console.log('  1e. Creating swap request...');
+                const swapRequest1 = await create_swap_request(inputProofs, allOutputs);
+                console.log('  Submitting swap request...');
+                const result1 = await ctx.submit_swap(swapRequest1, inputYs);
+
+                if (!result1.success) {
+                    throw new Error(`Swap failed: ${result1.error}`);
+                }
+                console.log('  Swap successful!');
+
+                // 1f. Unblind signatures to get proofs
+                console.log('  1f. Unblinding signatures...');
+                const allProofs = await ctx.unblind_signatures(
+                    result1.signatures,
+                    allSecrets,
+                    allFactors
+                );
+                console.log(`  Got ${allProofs.length} proofs total`);
+
+                // 1g. Store change proofs back to wallet, keep P2PK proofs
+                p2pkProofs = allProofs.slice(0, 2);
+                if (allProofs.length > 2) {
+                    const changeProofs = allProofs.slice(2);
+                    console.log(`  1g. Storing ${changeProofs.length} change proofs back to wallet...`);
+                    await ctx.add_proofs_to_wallet(changeProofs);
+                    await updateBalanceDisplay(mint.url);
+                }
+
+                // Check state of the created P2PK proofs
                 const states = await check_specific_proofs_state(mint.url, p2pkProofs);
-                console.log('Proof states:', states);
+                console.log('P2PK proof states:', states);
 
                 await saveTestResult({
                     testId, testName, mintUrl: mint.url, timestamp,

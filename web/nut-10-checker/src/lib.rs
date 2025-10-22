@@ -18,6 +18,9 @@ use wallet_db::LocalStorageWalletDatabase;
 mod lib_helpers;
 pub use lib_helpers::*;
 
+mod test_context;
+pub use test_context::TestContext;
+
 /// Helper function to select denominations that sum to target
 fn select_denominations(target: u64, available: &[u64]) -> Result<Vec<u64>, String> {
     let mut sorted = available.to_vec();
