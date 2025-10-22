@@ -287,6 +287,7 @@
                     state: 'Failed',
                     details: `Need at least 3 sat, have ${balance} sat. Please mint tokens first.`
                 });
+                await loadAndRenderResults();
                 // Skip remaining steps
                 for (let i = 2; i <= 4; i++) {
                     const stepNames = ['', '', 'Sign with Alice only', 'Sign with Bob only', 'Sign with both Alice and Bob'];
@@ -351,6 +352,7 @@
                     state: 'Passed',
                     details: 'Swapped for 2 P2PK 2-of-2 tokens (1, 2 sat)'
                 });
+                await loadAndRenderResults();
             } catch (err) {
                 console.error('Failed to swap for P2PK tokens:', err);
                 await saveTestResult({
@@ -359,6 +361,7 @@
                     expected: 'Success', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
                 });
+                await loadAndRenderResults();
                 // Skip remaining steps
                 for (let i = 2; i <= 4; i++) {
                     const stepNames = ['', '', 'Sign with Alice only', 'Sign with Bob only', 'Sign with both Alice and Bob'];
@@ -368,6 +371,7 @@
                         expected: i === 4 ? 'Accept' : 'Reject',
                         actual: 'Skipped', state: 'Skipped'
                     });
+                    await loadAndRenderResults();
                 }
                 return;
             }
@@ -387,17 +391,20 @@
                         expected: 'Reject', actual: 'Accept', state: 'Failed',
                         details: 'Swap succeeded with only 1 signature (expected to fail)'
                     });
+                    await loadAndRenderResults();
                     // Skip remaining since proofs are spent
                     await saveTestResult({
                         testId, testName, mintUrl: mint.url, timestamp,
                         stepNumber: 3, stepName: 'Sign with Bob only',
                         expected: 'Reject', actual: 'Skipped', state: 'Skipped'
                     });
+                    await loadAndRenderResults();
                     await saveTestResult({
                         testId, testName, mintUrl: mint.url, timestamp,
                         stepNumber: 4, stepName: 'Sign with both Alice and Bob',
                         expected: 'Accept', actual: 'Skipped', state: 'Skipped'
                     });
+                    await loadAndRenderResults();
                     return;
                 } else {
                     await saveTestResult({
@@ -406,6 +413,7 @@
                         expected: 'Reject', actual: 'Reject', state: 'Passed',
                         details: `Correctly rejected: ${result.error}`
                     });
+                    await loadAndRenderResults();
                 }
             } catch (err) {
                 await saveTestResult({
@@ -414,17 +422,20 @@
                     expected: 'Reject', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
                 });
+                await loadAndRenderResults();
                 // Skip remaining
                 await saveTestResult({
                     testId, testName, mintUrl: mint.url, timestamp,
                     stepNumber: 3, stepName: 'Sign with Bob only',
                     expected: 'Reject', actual: 'Skipped', state: 'Skipped'
                 });
+                await loadAndRenderResults();
                 await saveTestResult({
                     testId, testName, mintUrl: mint.url, timestamp,
                     stepNumber: 4, stepName: 'Sign with both Alice and Bob',
                     expected: 'Accept', actual: 'Skipped', state: 'Skipped'
                 });
+                await loadAndRenderResults();
                 return;
             }
 
@@ -443,12 +454,14 @@
                         expected: 'Reject', actual: 'Accept', state: 'Failed',
                         details: 'Swap succeeded with only 1 signature (expected to fail)'
                     });
+                    await loadAndRenderResults();
                     // Skip remaining
                     await saveTestResult({
                         testId, testName, mintUrl: mint.url, timestamp,
                         stepNumber: 4, stepName: 'Sign with both Alice and Bob',
                         expected: 'Accept', actual: 'Skipped', state: 'Skipped'
                     });
+                    await loadAndRenderResults();
                     return;
                 } else {
                     await saveTestResult({
@@ -457,6 +470,7 @@
                         expected: 'Reject', actual: 'Reject', state: 'Passed',
                         details: `Correctly rejected: ${result.error}`
                     });
+                    await loadAndRenderResults();
                 }
             } catch (err) {
                 await saveTestResult({
@@ -465,12 +479,14 @@
                     expected: 'Reject', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
                 });
+                await loadAndRenderResults();
                 // Skip remaining
                 await saveTestResult({
                     testId, testName, mintUrl: mint.url, timestamp,
                     stepNumber: 4, stepName: 'Sign with both Alice and Bob',
                     expected: 'Accept', actual: 'Skipped', state: 'Skipped'
                 });
+                await loadAndRenderResults();
                 return;
             }
 
@@ -504,6 +520,7 @@
                         expected: 'Accept', actual: 'Accept', state: 'Passed',
                         details: 'Swap succeeded with both signatures'
                     });
+                    await loadAndRenderResults();
                 } else {
                     await saveTestResult({
                         testId, testName, mintUrl: mint.url, timestamp,
@@ -511,6 +528,7 @@
                         expected: 'Accept', actual: 'Reject', state: 'Failed',
                         details: `Swap rejected: ${result.error}`
                     });
+                    await loadAndRenderResults();
                 }
             } catch (err) {
                 await saveTestResult({
@@ -519,6 +537,7 @@
                     expected: 'Accept', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
                 });
+                await loadAndRenderResults();
             }
         }
 
@@ -544,6 +563,7 @@
                     state: 'Failed',
                     details: `Need at least 3 sat, have ${balance} sat. Please mint tokens first.`
                 });
+                await loadAndRenderResults();
                 // Skip remaining steps
                 for (let i = 2; i <= 3; i++) {
                     const stepNames = ['', '', 'Sign and spend 1 sat proof', 'Sign and spend 2 sat proof'];
@@ -552,6 +572,7 @@
                         stepNumber: i, stepName: stepNames[i],
                         expected: 'Accept', actual: 'Skipped', state: 'Skipped'
                     });
+                    await loadAndRenderResults();
                 }
                 return;
             }
@@ -598,6 +619,7 @@
                     expected: 'Success', actual: 'Success', state: 'Passed',
                     details: 'Swapped for 2 P2PK 2-of-2 tokens (1, 2 sat)'
                 });
+                await loadAndRenderResults();
             } catch (err) {
                 console.error('Failed to swap for P2PK tokens:', err);
                 await saveTestResult({
@@ -606,6 +628,7 @@
                     expected: 'Success', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
                 });
+                await loadAndRenderResults();
                 // Skip remaining steps
                 for (let i = 2; i <= 3; i++) {
                     const stepNames = ['', '', 'Sign and spend 1 sat proof', 'Sign and spend 2 sat proof'];
@@ -614,6 +637,7 @@
                         stepNumber: i, stepName: stepNames[i],
                         expected: 'Accept', actual: 'Skipped', state: 'Skipped'
                     });
+                    await loadAndRenderResults();
                 }
                 return;
             }
@@ -630,6 +654,7 @@
                         expected: 'Accept', actual: 'Error', state: 'Failed',
                         details: `Expected 2 proofs but got ${proofsArray.length}`
                     });
+                    await loadAndRenderResults();
                 }
                 return;
             }
@@ -661,6 +686,7 @@
                         expected: 'Accept', actual: 'Accept', state: 'Passed',
                         details: 'Successfully spent 1 sat proof with both signatures'
                     });
+                    await loadAndRenderResults();
                 } else {
                     await saveTestResult({
                         testId, testName, mintUrl: mint.url, timestamp,
@@ -668,12 +694,14 @@
                         expected: 'Accept', actual: 'Reject', state: 'Failed',
                         details: `Swap rejected: ${result.error}`
                     });
+                    await loadAndRenderResults();
                     // Skip remaining step
                     await saveTestResult({
                         testId, testName, mintUrl: mint.url, timestamp,
                         stepNumber: 3, stepName: 'Sign and spend 2 sat proof',
                         expected: 'Accept', actual: 'Skipped', state: 'Skipped'
                     });
+                    await loadAndRenderResults();
                     return;
                 }
             } catch (err) {
@@ -683,12 +711,14 @@
                     expected: 'Accept', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
                 });
+                await loadAndRenderResults();
                 // Skip remaining step
                 await saveTestResult({
                     testId, testName, mintUrl: mint.url, timestamp,
                     stepNumber: 3, stepName: 'Sign and spend 2 sat proof',
                     expected: 'Accept', actual: 'Skipped', state: 'Skipped'
                 });
+                await loadAndRenderResults();
                 return;
             }
 
@@ -719,6 +749,7 @@
                         expected: 'Accept', actual: 'Accept', state: 'Passed',
                         details: 'Successfully spent 2 sat proof with both signatures'
                     });
+                    await loadAndRenderResults();
                 } else {
                     await saveTestResult({
                         testId, testName, mintUrl: mint.url, timestamp,
@@ -726,6 +757,7 @@
                         expected: 'Accept', actual: 'Reject', state: 'Failed',
                         details: `Swap rejected: ${result.error}`
                     });
+                    await loadAndRenderResults();
                 }
             } catch (err) {
                 await saveTestResult({
@@ -734,6 +766,7 @@
                     expected: 'Accept', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
                 });
+                await loadAndRenderResults();
             }
         }
 
@@ -759,22 +792,26 @@
                     state: 'Failed',
                     details: `Need at least 3 sat, have ${balance} sat. Please mint tokens first.`
                 });
+                await loadAndRenderResults();
                 // Skip remaining steps
                 await saveTestResult({
                     testId, testName, mintUrl: mint.url, timestamp,
                     stepNumber: 2, stepName: 'Spend first proof individually',
                     expected: 'Reject', actual: 'Skipped', state: 'Skipped'
                 });
+                await loadAndRenderResults();
                 await saveTestResult({
                     testId, testName, mintUrl: mint.url, timestamp,
                     stepNumber: 3, stepName: 'Spend second proof individually',
                     expected: 'Reject', actual: 'Skipped', state: 'Skipped'
                 });
+                await loadAndRenderResults();
                 await saveTestResult({
                     testId, testName, mintUrl: mint.url, timestamp,
                     stepNumber: 4, stepName: 'Spend both proofs together',
                     expected: 'Accept', actual: 'Skipped', state: 'Skipped'
                 });
+                await loadAndRenderResults();
                 return;
             }
 
@@ -812,6 +849,7 @@
                     expected: 'Success', actual: 'Success', state: 'Passed',
                     details: `Created 2 P2PK 2-of-2 tokens with SigAll (1, 2 sat). States: ${states.join(', ')}`
                 });
+                await loadAndRenderResults();
             } catch (err) {
                 console.error('Failed to create P2PK tokens:', err);
                 await saveTestResult({
@@ -820,12 +858,14 @@
                     expected: 'Success', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
                 });
+                await loadAndRenderResults();
                 // Skip remaining steps
                 await saveTestResult({
                     testId, testName, mintUrl: mint.url, timestamp,
                     stepNumber: 2, stepName: 'Spend P2PK proofs with 2-of-2 signatures',
                     expected: 'Accept', actual: 'Skipped', state: 'Skipped'
                 });
+                await loadAndRenderResults();
                 return;
             }
 
@@ -876,6 +916,7 @@
                     expected: 'Accept', actual: 'Accept', state: 'Passed',
                     details: 'Successfully spent P2PK proofs using 2-of-2 multisig with SigAll'
                 });
+                await loadAndRenderResults();
             } catch (err) {
                 console.error('  Step 2 error:', err);
                 await saveTestResult({
@@ -884,6 +925,7 @@
                     expected: 'Accept', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
                 });
+                await loadAndRenderResults();
             }
         }
 
