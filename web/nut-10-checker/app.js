@@ -47,13 +47,24 @@ async function initDB() {
 
 // Mints management
 async function saveMint(url, info) {
-    // Check if this is the first mint - if so, make it active
-    const allMints = await getMints();
-    const isActive = allMints.length === 0;
-
     const tx = db.transaction(['mints'], 'readwrite');
     const store = tx.objectStore('mints');
-    await store.put({ url, info, addedAt: Date.now(), isActive });
+
+    // Get all existing mints
+    const allMints = await new Promise((resolve, reject) => {
+        const request = store.getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+
+    // Deactivate all existing mints
+    for (const mint of allMints) {
+        mint.isActive = false;
+        await store.put(mint);
+    }
+
+    // Add new mint as active
+    await store.put({ url, info, addedAt: Date.now(), isActive: true });
     return tx.complete;
 }
 
