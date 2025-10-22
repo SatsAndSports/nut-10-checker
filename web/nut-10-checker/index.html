@@ -89,6 +89,7 @@
             check_mint_quote_status,
             mint_tokens,
             get_wallet_balance,
+            get_wallet_balance_by_state,
             get_mint_denominations,
             swap_to_p2pk_2of2,
             swap_with_signatures
@@ -634,15 +635,34 @@
                 }
 
                 console.log('Fetching balance for', mintUrl);
-                const balance = await get_wallet_balance(mintUrl, mint.info.seed);
-                console.log('Balance for', mintUrl, ':', balance);
+                const balanceByState = await get_wallet_balance_by_state(mintUrl, mint.info.seed);
+                console.log('Balance breakdown for', mintUrl, ':', balanceByState);
+
+                // Extract values from Map (WASM returns Map, not plain object)
+                const unspent = balanceByState.get ? balanceByState.get('unspent') : balanceByState.unspent;
+                const pending = balanceByState.get ? balanceByState.get('pending') : balanceByState.pending;
+                const reserved = balanceByState.get ? balanceByState.get('reserved') : balanceByState.reserved;
+                const spent = balanceByState.get ? balanceByState.get('spent') : balanceByState.spent;
+                const pending_spent = balanceByState.get ? balanceByState.get('pending_spent') : balanceByState.pending_spent;
+
+                // Build balance display string
+                let balanceText = `${unspent} sat`;
+                const extras = [];
+                if (pending > 0) extras.push(`${pending} pending`);
+                if (reserved > 0) extras.push(`${reserved} reserved`);
+                if (spent > 0) extras.push(`${spent} spent`);
+                if (pending_spent > 0) extras.push(`${pending_spent} pending_spent`);
+
+                if (extras.length > 0) {
+                    balanceText += ` (${extras.join(', ')})`;
+                }
 
                 // Update the UI
                 const mintElement = document.querySelector(`.mint-item[data-url="${CSS.escape(mintUrl)}"]`);
                 if (mintElement) {
                     const balanceElement = mintElement.querySelector('.mint-balance');
                     if (balanceElement) {
-                        balanceElement.textContent = `Balance: ${balance} sat`;
+                        balanceElement.textContent = `Balance: ${balanceText}`;
                     }
                 } else {
                     console.error('Could not find mint element for:', mintUrl);

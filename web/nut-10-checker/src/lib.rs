@@ -185,7 +185,77 @@ pub async fn mint_tokens(
     Ok(total)
 }
 
-/// Get wallet balance
+/// Get wallet balance with breakdown by state
+#[wasm_bindgen]
+pub async fn get_wallet_balance_by_state(
+    mint_url: String,
+    seed_words: String,
+) -> Result<JsValue, JsValue> {
+    let url: MintUrl = mint_url.parse()
+        .map_err(|e| JsValue::from_str(&format!("Invalid mint URL: {:?}", e)))?;
+
+    let mnemonic = Mnemonic::parse(&seed_words)
+        .map_err(|e| JsValue::from_str(&format!("Invalid seed: {:?}", e)))?;
+
+    let seed = mnemonic.to_seed("");
+
+    // Create unique storage key for this mint
+    let storage_key = format!("wallet_{}", url.to_string().replace("://", "_").replace("/", "_"));
+    let store = Arc::new(LocalStorageWalletDatabase::new(&storage_key).await?);
+
+    let http_client = HttpClient::new(url.clone());
+
+    let wallet = WalletBuilder::new()
+        .mint_url(url.clone())
+        .unit(CurrencyUnit::Sat)
+        .localstore(store)
+        .seed(seed)
+        .client(http_client)
+        .build()
+        .map_err(|e| JsValue::from_str(&format!("Failed to build wallet: {:?}", e)))?;
+
+    // Get all proofs
+    let all_proofs = wallet.localstore
+        .get_proofs(
+            Some(wallet.mint_url.clone()),
+            Some(wallet.unit.clone()),
+            None,
+            None,
+        )
+        .await
+        .map_err(|e| JsValue::from_str(&format!("Failed to get proofs: {:?}", e)))?;
+
+    // Calculate balance by state
+    let mut unspent: u64 = 0;
+    let mut pending: u64 = 0;
+    let mut spent: u64 = 0;
+    let mut reserved: u64 = 0;
+    let mut pending_spent: u64 = 0;
+
+    for proof_info in all_proofs {
+        let amount = u64::from(proof_info.proof.amount);
+        match proof_info.state {
+            cdk_common::nuts::State::Unspent => unspent += amount,
+            cdk_common::nuts::State::Pending => pending += amount,
+            cdk_common::nuts::State::Spent => spent += amount,
+            cdk_common::nuts::State::Reserved => reserved += amount,
+            cdk_common::nuts::State::PendingSpent => pending_spent += amount,
+        }
+    }
+
+    let result = serde_json::json!({
+        "unspent": unspent,
+        "pending": pending,
+        "spent": spent,
+        "reserved": reserved,
+        "pending_spent": pending_spent,
+        "total": unspent + pending + spent + reserved + pending_spent,
+    });
+
+    Ok(serde_wasm_bindgen::to_value(&result)?)
+}
+
+/// Get wallet balance (unspent only)
 #[wasm_bindgen]
 pub async fn get_wallet_balance(
     mint_url: String,
@@ -399,6 +469,7 @@ pub async fn swap_to_p2pk_2of2(
 
     // Select proofs that sum to at least total_p2pk (7 sat)
     let mut input_proofs = Vec::new();
+    let mut input_ys = Vec::new(); // Track Y values to remove from wallet
     let mut input_total: u64 = 0;
 
     for proof_info in all_proofs {
@@ -406,6 +477,7 @@ pub async fn swap_to_p2pk_2of2(
             break;
         }
         input_total += u64::from(proof_info.proof.amount);
+        input_ys.push(proof_info.y.clone());
         input_proofs.push(proof_info.proof);
     }
 
@@ -469,12 +541,29 @@ pub async fn swap_to_p2pk_2of2(
         }
     }
 
+    // Mark input proofs as Pending before attempting swap
+    web_sys::console::log_1(&format!("Marking {} input proofs as Pending", input_ys.len()).into());
+    wallet.localstore.update_proofs_state(input_ys.clone(), cdk_common::nuts::State::Pending).await
+        .map_err(|e| JsValue::from_str(&format!("Failed to mark proofs as pending: {:?}", e)))?;
+
     // Create swap request (like spillman)
     let swap_request = SwapRequest::new(input_proofs, blinded_outputs);
 
     // Execute swap via HTTP client
-    let swap_response = http_client2.post_swap(swap_request).await
-        .map_err(|e| JsValue::from_str(&format!("Failed to swap: {:?}", e)))?;
+    let swap_response = match http_client2.post_swap(swap_request).await {
+        Ok(response) => response,
+        Err(e) => {
+            // Swap failed - mark proofs back as Unspent
+            web_sys::console::log_1(&format!("Swap failed, marking proofs back as Unspent").into());
+            let _ = wallet.localstore.update_proofs_state(input_ys, cdk_common::nuts::State::Unspent).await;
+            return Err(JsValue::from_str(&format!("Failed to swap: {:?}", e)));
+        }
+    };
+
+    // Swap succeeded - mark proofs as Spent and remove them
+    web_sys::console::log_1(&format!("Swap successful, removing {} spent proofs from wallet", input_ys.len()).into());
+    wallet.localstore.update_proofs(vec![], input_ys).await
+        .map_err(|e| JsValue::from_str(&format!("Failed to remove spent proofs: {:?}", e)))?;
 
     // Get mint keys to unblind
     let all_keys = http_client2.get_mint_keys().await
