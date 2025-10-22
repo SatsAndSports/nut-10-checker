@@ -1392,6 +1392,75 @@
                 });
                 await loadAndRenderResults();
             }
+
+            // Step 3: Sign with D and E (2 valid post-locktime signatures - should succeed)
+            try {
+                console.log('Step 3: Signing with D and E (should succeed)...');
+
+                // 3a. Create regular blinded outputs
+                console.log('  3a. Creating regular blinded outputs...');
+                const outputData3 = await create_blinded_outputs(mint.url, [BigInt(1), BigInt(2)]);
+                const regularOutputs3 = outputData3.outputs;
+                const regularSecrets3 = outputData3.secrets;
+                const regularFactors3 = outputData3.blinding_factors;
+                console.log('  Created 2 regular blinded outputs');
+
+                // 3b. Create swap request
+                console.log('  3b. Creating swap request...');
+                const swapRequest3 = await create_swap_request(p2pkProofs, regularOutputs3);
+                console.log('  Created swap request');
+
+                // 3c. Sign with D and E (2 valid post-locktime keys)
+                console.log('  3c. Signing with D and E...');
+                const signedSwapRequest3 = await sign_swap_request_p2pk(swapRequest3, [D.secret, E.secret]);
+                console.log('  Signed with 2 keys (D, E from post-locktime set)');
+
+                // 3d. Submit (should succeed)
+                console.log('  3d. Submitting swap (should succeed)...');
+                const result3 = await submit_swap_request(mint.url, signedSwapRequest3);
+
+                if (!result3.success) {
+                    throw new Error(`Swap failed: ${result3.error}`);
+                }
+                console.log('  Swap successful!');
+
+                // 3e. Unblind signatures to get regular proofs
+                console.log('  3e. Unblinding signatures...');
+                const regularProofs3 = await unblind_signatures(
+                    mint.url,
+                    result3.signatures,
+                    regularSecrets3,
+                    regularFactors3
+                );
+                console.log('  Got 2 regular proofs');
+
+                // 3f. Add regular proofs back to wallet
+                console.log('  3f. Adding regular proofs back to wallet...');
+                try {
+                    await add_proofs_to_wallet(mint.url, mint.info.seed, regularProofs3);
+                    console.log('  Successfully added output proofs to wallet');
+                    await updateBalanceDisplay(mint.url);
+                } catch (addErr) {
+                    console.error('  Failed to add proofs to wallet:', addErr);
+                }
+
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 3, stepName: 'Sign with D,E (valid 2-of-3)',
+                    expected: 'Accept', actual: 'Accept', state: 'Passed',
+                    details: `Successfully spent with 2 valid post-locktime signatures (D, E from refund set)`
+                });
+                await loadAndRenderResults();
+            } catch (err) {
+                console.error('  Step 3 error:', err);
+                await saveTestResult({
+                    testId, testName, mintUrl: mint.url, timestamp,
+                    stepNumber: 3, stepName: 'Sign with D,E (valid 2-of-3)',
+                    expected: 'Accept', actual: 'Error', state: 'Failed',
+                    details: err.message || String(err)
+                });
+                await loadAndRenderResults();
+            }
         }
 
         async function waitForPayment(mintUrl, seed, quoteId, timeoutSeconds = 300) {
