@@ -15,6 +15,9 @@ use std::str::FromStr;
 mod wallet_db;
 use wallet_db::LocalStorageWalletDatabase;
 
+mod lib_helpers;
+pub use lib_helpers::*;
+
 /// Helper function to select denominations that sum to target
 fn select_denominations(target: u64, available: &[u64]) -> Result<Vec<u64>, String> {
     let mut sorted = available.to_vec();
@@ -1074,10 +1077,39 @@ pub async fn sign_proofs_with_sig_all(
     // Create swap request
     let mut swap_request = SwapRequest::new(proofs, outputs);
 
+    // Log existing witness state
+    if let Some(first_proof) = swap_request.inputs().first() {
+        if let Some(witness) = &first_proof.witness {
+            web_sys::console::log_1(&format!("Before signing: First proof already has witness with {} signatures",
+                witness.signatures().map(|s| s.len()).unwrap_or(0)).into());
+        } else {
+            web_sys::console::log_1(&"Before signing: First proof has no witness".into());
+        }
+    }
+
+    // Log the message we're about to sign
+    let msg_to_sign = swap_request.sig_all_msg_to_sign();
+    web_sys::console::log_1(&format!("Message to sign (SigAll): {}", msg_to_sign).into());
+
     // Sign with SigAll - all signatures go in first proof's witness
     for secret in secrets {
         swap_request.sign_sig_all(secret)
             .map_err(|e| JsValue::from_str(&format!("Failed to sign with SigAll: {:?}", e)))?;
+    }
+
+    // Log final witness state
+    if let Some(first_proof) = swap_request.inputs().first() {
+        if let Some(witness) = &first_proof.witness {
+            let num_sigs = witness.signatures().map(|s| s.len()).unwrap_or(0);
+            web_sys::console::log_1(&format!("After signing: First proof witness has {} signatures", num_sigs).into());
+
+            // Log each signature for debugging
+            if let Some(sigs) = witness.signatures() {
+                for (i, sig) in sigs.iter().enumerate() {
+                    web_sys::console::log_1(&format!("  Signature {}: {} bytes", i, sig.len()).into());
+                }
+            }
+        }
     }
 
     // Return the signed proofs (inputs from the swap request)
@@ -1127,6 +1159,20 @@ pub async fn submit_signed_proofs(
     let swap_request = SwapRequest::new(signed_proofs, outputs);
 
     web_sys::console::log_1(&format!("Submitting swap with {} signed proofs", swap_request.inputs().len()).into());
+
+    // Log the message the mint will verify signatures against
+    let verify_msg = swap_request.sig_all_msg_to_sign();
+    web_sys::console::log_1(&format!("Message mint will verify (SigAll): {}", verify_msg).into());
+
+    // Log witness info
+    if let Some(first_proof) = swap_request.inputs().first() {
+        if let Some(witness) = &first_proof.witness {
+            let num_sigs = witness.signatures().map(|s| s.len()).unwrap_or(0);
+            web_sys::console::log_1(&format!("First proof has {} signatures in witness", num_sigs).into());
+        } else {
+            web_sys::console::log_1(&"First proof has NO witness!".into());
+        }
+    }
 
     // Submit the swap request
     match http_client.post_swap(swap_request).await {
