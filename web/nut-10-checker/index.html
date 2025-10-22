@@ -241,25 +241,25 @@
 
             console.log('Running tests on mint:', activeMint.url);
 
+            // Single timestamp for the entire batch
+            const batchTimestamp = Date.now();
+
             // Run P2PK 2-of-2 test
             if (testP2PK) {
                 const testId = `test-${Date.now()}`;
-                const timestamp = Date.now();
-                await runP2PK2of2Test(activeMint, testId, timestamp);
+                await runP2PK2of2Test(activeMint, testId, batchTimestamp);
             }
 
             // Run P2PK 2-of-2 individual proofs test
             if (testP2PKIndividual) {
                 const testId = `test-${Date.now()}`;
-                const timestamp = Date.now();
-                await runP2PK2of2IndividualTest(activeMint, testId, timestamp);
+                await runP2PK2of2IndividualTest(activeMint, testId, batchTimestamp);
             }
 
             // Run P2PK 2-of-2 SigAll test
             if (testP2PKSigAll) {
                 const testId = `test-${Date.now()}`;
-                const timestamp = Date.now();
-                await runP2PK2of2SigAllTest(activeMint, testId, timestamp);
+                await runP2PK2of2SigAllTest(activeMint, testId, batchTimestamp);
             }
 
             await loadAndRenderResults();
