@@ -87,10 +87,11 @@ h2 {
     color: var(--text-light);
 }
 
-.mint-item .active-badge {
-    color: var(--primary);
-    font-size: 0.85rem;
-    font-weight: 600;
+.active-badge-btn {
+    background: var(--primary) !important;
+    color: white !important;
+    cursor: default !important;
+    opacity: 1 !important;
 }
 
 .mint-actions {

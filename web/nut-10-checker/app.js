@@ -194,14 +194,14 @@ function renderMints(mints) {
     container.innerHTML = mints.map(mint => `
         <div class="mint-item ${mint.isActive ? 'active' : ''}" data-url="${mint.url}">
             <div>
-                <div class="mint-url">
-                    ${mint.isActive ? '⭐ ' : ''}${mint.url}
-                    ${mint.isActive ? ' <span class="active-badge">(Active)</span>' : ''}
-                </div>
+                <div class="mint-url">${mint.url}</div>
                 <div class="mint-balance">Balance: Loading...</div>
             </div>
             <div class="mint-actions">
-                ${!mint.isActive ? `<button class="set-active-btn" data-url="${mint.url}">Set Active</button>` : ''}
+                ${mint.isActive
+                    ? '<button class="active-badge-btn" disabled>Active</button>'
+                    : `<button class="set-active-btn" data-url="${mint.url}">Set Active</button>`
+                }
                 <button class="check-state-btn" data-url="${mint.url}">Check State</button>
                 <button class="delete-mint-btn" data-url="${mint.url}">Remove</button>
             </div>
