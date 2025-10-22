@@ -262,14 +262,14 @@
             const balance = await get_wallet_balance(mint.url, mint.info.seed);
             console.log('Current wallet balance:', balance, 'sat');
 
-            if (balance < 7) {
+            if (balance < 3) {
                 console.error('Insufficient balance for test');
                 await saveTestResult({
                     testId, testName, mintUrl: mint.url, timestamp,
                     stepNumber: 1, stepName: 'Swap tokens for P2PK',
                     expected: 'Success', actual: 'Insufficient balance',
                     state: 'Failed',
-                    details: `Need at least 7 sat, have ${balance} sat. Please mint tokens first.`
+                    details: `Need at least 3 sat, have ${balance} sat. Please mint tokens first.`
                 });
                 // Skip remaining steps
                 for (let i = 2; i <= 4; i++) {
@@ -303,7 +303,7 @@
             // Step 1: Swap existing tokens for P2PK 2-of-2 tokens
             let proofs;
             try {
-                console.log(`Step 1: Swapping for P2PK 2-of-2 tokens (1, 2, 4 sat)...`);
+                console.log(`Step 1: Swapping for P2PK 2-of-2 tokens (1, 2 sat)...`);
                 console.log('Mint URL:', mint.url);
                 console.log('Alice pubkey:', alicePubkey);
                 console.log('Bob pubkey:', bobPubkey);
@@ -332,7 +332,7 @@
                     expected: 'Success',
                     actual: 'Success',
                     state: 'Passed',
-                    details: 'Swapped for 3 P2PK 2-of-2 tokens (1, 2, 4 sat)'
+                    details: 'Swapped for 2 P2PK 2-of-2 tokens (1, 2 sat)'
                 });
             } catch (err) {
                 console.error('Failed to swap for P2PK tokens:', err);
@@ -771,10 +771,10 @@
                 if (checked === 0) {
                     resultsDiv.innerHTML = '<p>No proofs found in wallet.</p>';
                 } else if (Object.keys(changes).length === 0) {
-                    resultsDiv.innerHTML = `<p>Checked ${checked} proof(s). All states are up to date.</p>`;
+                    resultsDiv.innerHTML = `<p>Refreshed ${checked} proof(s).</p>`;
                 } else {
                     // Build summary of changes
-                    let html = `<p>Checked ${checked} proof(s). Found state changes:</p><ul>`;
+                    let html = `<p>Refreshed ${checked} proof(s). Found state changes:</p><ul>`;
                     for (const [transition, amount] of Object.entries(changes)) {
                         html += `<li><strong>${transition}:</strong> ${amount} sat</li>`;
                     }

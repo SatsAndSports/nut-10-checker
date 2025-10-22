@@ -446,8 +446,8 @@ pub async fn swap_to_p2pk_2of2(
     // Convert JsValue to Vec<u64>
     let denominations: Vec<u64> = serde_wasm_bindgen::from_value(denominations)
         .map_err(|e| JsValue::from_str(&format!("Failed to parse denominations: {:?}", e)))?;
-    // Hardcoded: create 1, 2, 4 sat P2PK proofs (total 7 sat)
-    let p2pk_amounts = vec![1u64, 2, 4];
+    // Hardcoded: create 1, 2 sat P2PK proofs (total 3 sat - minimal risk)
+    let p2pk_amounts = vec![1u64, 2];
     let total_p2pk: u64 = p2pk_amounts.iter().sum();
 
     web_sys::console::log_1(&format!("swap_to_p2pk_2of2: creating P2PK proofs for {:?} (total {} sat)",
@@ -609,9 +609,9 @@ pub async fn swap_to_p2pk_2of2(
 
     web_sys::console::log_1(&format!("Unblinded {} proofs total", all_proofs.len()).into());
 
-    // Store change proofs back in wallet (everything after the first 3)
-    if all_proofs.len() > 3 {
-        let change_proofs = &all_proofs[3..];
+    // Store change proofs back in wallet (everything after the first 2)
+    if all_proofs.len() > 2 {
+        let change_proofs = &all_proofs[2..];
         web_sys::console::log_1(&format!("Storing {} change proofs back to wallet", change_proofs.len()).into());
 
         for change_proof in change_proofs {
@@ -628,8 +628,8 @@ pub async fn swap_to_p2pk_2of2(
         }
     }
 
-    // Return only the P2PK proofs (first 3)
-    let p2pk_proofs: Vec<_> = all_proofs.into_iter().take(3).collect();
+    // Return only the P2PK proofs (first 2)
+    let p2pk_proofs: Vec<_> = all_proofs.into_iter().take(2).collect();
     web_sys::console::log_1(&format!("Returning {} P2PK proofs: {:?}",
         p2pk_proofs.len(),
         p2pk_proofs.iter().map(|p| u64::from(p.amount)).collect::<Vec<_>>()).into());
