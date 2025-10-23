@@ -226,6 +226,10 @@ button.primary:hover {
     border-left-color: var(--error);
 }
 
+.test-result.partial {
+    border-left-color: #ff9800;
+}
+
 .test-result-header {
     display: flex;
     justify-content: space-between;
@@ -246,6 +250,10 @@ button.primary:hover {
 
 .test-result.failed .test-result-status {
     color: var(--error);
+}
+
+.test-result.partial .test-result-status {
+    color: #ff9800;
 }
 
 .test-result-details {

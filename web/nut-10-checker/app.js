@@ -298,8 +298,22 @@ function renderResults(results) {
     tests.forEach(test => {
         // Determine overall status
         const hasFailed = test.steps.some(s => s.state === 'Failed');
+        const hasSkipped = test.steps.some(s => s.state === 'Skipped');
         const allPassed = test.steps.every(s => s.state === 'Passed');
-        const overallStatus = hasFailed ? 'failed' : (allPassed ? 'passed' : 'partial');
+
+        // Count expected steps based on test name
+        const expectedStepCounts = {
+            'P2PK 2-of-2 Multisig': 3,
+            'P2PK 2-of-2 Multisig - individual proofs': 3,
+            'P2PK 2-of-2 Multisig SIGALL': 3,
+            'P2PK Locktime + Refund': 3
+        };
+        const expectedSteps = expectedStepCounts[test.testName] || test.steps.length;
+        const isComplete = test.steps.length >= expectedSteps;
+
+        const overallStatus = hasFailed ? 'failed' :
+                             (allPassed && isComplete) ? 'passed' :
+                             'partial';
 
         // Check if this is the start of a new batch
         const isNewBatch = test.timestamp !== previousTimestamp;
@@ -320,7 +334,7 @@ function renderResults(results) {
                 <div class="test-result-header">
                     <span class="test-result-title">${test.testName}</span>
                     <span class="test-result-status">
-                        ${hasFailed ? '✗ FAILED' : (allPassed ? '✓ PASSED' : '⚠ PARTIAL')}
+                        ${hasFailed ? '✗ FAILED' : (allPassed && isComplete ? '✓ PASSED' : '⚠ IN PROGRESS')}
                     </span>
                 </div>
                 <div class="test-result-details">
