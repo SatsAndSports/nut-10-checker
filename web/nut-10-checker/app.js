@@ -216,6 +216,7 @@ function renderMints(mints) {
                     ? '<button class="active-badge-btn" disabled>Active</button>'
                     : `<button class="set-active-btn" data-url="${mint.url}">Set Active</button>`
                 }
+                <button class="withdraw-btn" data-url="${mint.url}">Withdraw</button>
                 <button class="check-state-btn" data-url="${mint.url}">Check State</button>
                 <button class="delete-mint-btn" data-url="${mint.url}">Remove</button>
             </div>
@@ -235,6 +236,14 @@ function renderMints(mints) {
                 // Dispatch event to trigger balance update
                 window.dispatchEvent(new CustomEvent('updateBalance', { detail: { mintUrl: mint.url } }));
             }
+        });
+    });
+
+    // Add withdraw handlers
+    container.querySelectorAll('.withdraw-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const url = btn.dataset.url;
+            window.dispatchEvent(new CustomEvent('withdraw', { detail: { mintUrl: url } }));
         });
     });
 

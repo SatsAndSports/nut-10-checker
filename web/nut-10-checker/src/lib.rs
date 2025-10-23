@@ -261,6 +261,50 @@ pub async fn get_wallet_balance_by_state(
     Ok(serde_wasm_bindgen::to_value(&result)?)
 }
 
+/// Create a Cashu token from wallet proofs
+#[wasm_bindgen]
+pub async fn create_token(
+    mint_url: String,
+    seed_words: String,
+    amount: u64,
+) -> Result<String, JsValue> {
+    let url: MintUrl = mint_url.parse()
+        .map_err(|e| JsValue::from_str(&format!("Invalid mint URL: {:?}", e)))?;
+
+    let mnemonic = Mnemonic::parse(&seed_words)
+        .map_err(|e| JsValue::from_str(&format!("Invalid seed: {:?}", e)))?;
+
+    let seed = mnemonic.to_seed("");
+
+    let storage_key = format!("wallet_{}", url.to_string().replace("://", "_").replace("/", "_"));
+    let store = Arc::new(LocalStorageWalletDatabase::new(&storage_key).await?);
+
+    let http_client = HttpClient::new(url.clone());
+
+    let wallet = WalletBuilder::new()
+        .mint_url(url)
+        .unit(CurrencyUnit::Sat)
+        .localstore(store)
+        .seed(seed)
+        .client(http_client)
+        .build()
+        .map_err(|e| JsValue::from_str(&format!("Failed to build wallet: {:?}", e)))?;
+
+    // Use wallet's built-in prepare_send and confirm methods
+    // - Selects optimal proofs
+    // - Marks them as spent
+    // - Creates the token string
+    use cdk::wallet::SendOptions;
+
+    let prepared = wallet.prepare_send(Amount::from(amount), SendOptions::default()).await
+        .map_err(|e| JsValue::from_str(&format!("Failed to prepare send: {:?}", e)))?;
+
+    let token = prepared.confirm(None).await
+        .map_err(|e| JsValue::from_str(&format!("Failed to confirm send: {:?}", e)))?;
+
+    Ok(token.to_string())
+}
+
 /// Get wallet balance (unspent only)
 #[wasm_bindgen]
 pub async fn get_wallet_balance(

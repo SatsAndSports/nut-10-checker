@@ -29,7 +29,7 @@
                 <p>Loading wallet...</p>
             </div>
             <div class="mint-controls">
-                <input type="number" id="mint-amount" placeholder="Amount (sat)" value="100" min="1">
+                <input type="number" id="mint-amount" placeholder="Amount (sat)" value="10" min="1">
                 <button id="mint-tokens-btn">Mint Tokens</button>
             </div>
         </section>
@@ -51,6 +51,19 @@
                 <h3>Proof State Check Results</h3>
                 <div id="check-state-results"></div>
                 <button id="close-check-state-btn">Close</button>
+            </div>
+        </div>
+
+        <!-- Token Dialog -->
+        <div id="token-dialog" class="dialog" style="display: none;">
+            <div class="dialog-content">
+                <h3>Withdrawal Token</h3>
+                <p id="token-amount"></p>
+                <div id="token-text"></div>
+                <div style="margin-top: 1rem; display: flex; gap: 0.5rem; justify-content: center;">
+                    <button id="copy-token-btn" class="primary">Copy to Clipboard</button>
+                    <button id="close-token-btn">Close</button>
+                </div>
             </div>
         </div>
 
@@ -101,6 +114,7 @@
             create_mint_quote,
             check_mint_quote_status,
             mint_tokens,
+            create_token,
             get_wallet_balance,
             get_wallet_balance_by_state,
             get_mint_denominations,
@@ -169,6 +183,8 @@
             });
             document.getElementById('mint-tokens-btn').addEventListener('click', mintTokens);
             document.getElementById('close-dialog-btn').addEventListener('click', closeDialog);
+            document.getElementById('close-token-btn').addEventListener('click', closeTokenDialog);
+            document.getElementById('copy-token-btn').addEventListener('click', copyTokenToClipboard);
             document.getElementById('run-tests-btn').addEventListener('click', runTests);
             document.getElementById('export-results-btn').addEventListener('click', handleExportResults);
             document.getElementById('clear-results-btn').addEventListener('click', handleClearResults);
@@ -1705,6 +1721,89 @@
             document.getElementById('check-state-dialog').style.display = 'none';
         }
 
+        function showTokenDialog(token, amount) {
+            const dialog = document.getElementById('token-dialog');
+            const amountText = document.getElementById('token-amount');
+            const tokenText = document.getElementById('token-text');
+
+            amountText.textContent = `Amount: ${amount} sat`;
+            tokenText.textContent = token;
+            tokenText.style.wordBreak = 'break-all';
+            tokenText.style.fontFamily = 'monospace';
+            tokenText.style.fontSize = '0.85rem';
+            tokenText.style.background = 'var(--bg)';
+            tokenText.style.padding = '1rem';
+            tokenText.style.borderRadius = '8px';
+            tokenText.style.maxHeight = '200px';
+            tokenText.style.overflowY = 'auto';
+
+            dialog.style.display = 'flex';
+        }
+
+        function closeTokenDialog() {
+            document.getElementById('token-dialog').style.display = 'none';
+        }
+
+        async function copyTokenToClipboard() {
+            const tokenText = document.getElementById('token-text').textContent;
+            try {
+                await navigator.clipboard.writeText(tokenText);
+                const btn = document.getElementById('copy-token-btn');
+                const originalText = btn.textContent;
+                btn.textContent = '✓ Copied!';
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                }, 2000);
+            } catch (err) {
+                alert('Failed to copy to clipboard');
+            }
+        }
+
+        async function handleWithdraw(mintUrl) {
+            try {
+                const mint = await getMint(mintUrl);
+                if (!mint || !mint.info.seed) {
+                    alert('No wallet found for this mint');
+                    return;
+                }
+
+                // Get current balance
+                const balance = await get_wallet_balance(mintUrl, mint.info.seed);
+
+                // Prompt for amount
+                const amountStr = prompt(`Enter amount to withdraw (available: ${balance} sat):`);
+                if (!amountStr) return; // Cancelled
+
+                const amount = parseInt(amountStr);
+                if (isNaN(amount) || amount <= 0) {
+                    alert('Invalid amount');
+                    return;
+                }
+
+                if (amount > balance) {
+                    alert(`Insufficient balance. You have ${balance} sat but requested ${amount} sat.`);
+                    return;
+                }
+
+                console.log(`Creating token for ${amount} sat from ${mintUrl}`);
+
+                // Create token (amount must be BigInt)
+                const token = await create_token(mintUrl, mint.info.seed, BigInt(amount));
+
+                console.log('Token created:', token);
+
+                // Show token in a modal dialog
+                showTokenDialog(token, amount);
+
+                // Update balance display
+                await updateBalanceDisplay(mintUrl);
+
+            } catch (err) {
+                console.error('Failed to create withdrawal token:', err);
+                alert(`Failed to create withdrawal token: ${err.message || err}`);
+            }
+        }
+
         async function handleCheckState(mintUrl) {
             try {
                 const mint = await getMint(mintUrl);
@@ -1752,6 +1851,10 @@
         }
 
         // Event listeners
+        window.addEventListener('withdraw', async (e) => {
+            await handleWithdraw(e.detail.mintUrl);
+        });
+
         window.addEventListener('checkState', (e) => {
             handleCheckState(e.detail.mintUrl);
         });
