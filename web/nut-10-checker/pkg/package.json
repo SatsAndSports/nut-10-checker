@@ -1,0 +1,15 @@
+{
+  "name": "nut-10-checker",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "nut_10_checker_bg.wasm",
+    "nut_10_checker.js",
+    "nut_10_checker.d.ts"
+  ],
+  "main": "nut_10_checker.js",
+  "types": "nut_10_checker.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
