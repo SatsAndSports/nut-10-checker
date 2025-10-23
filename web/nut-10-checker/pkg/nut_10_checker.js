@@ -780,13 +780,13 @@ export function unblind_signatures(mint_url, signatures_json, secrets_json, blin
     return ret;
 }
 
-function __wbg_adapter_14(arg0, arg1) {
+function __wbg_adapter_8(arg0, arg1) {
     _assertNum(arg0);
     _assertNum(arg1);
     wasm.wasm_bindgen__convert__closures_____invoke__h57d8dd306e15d6a6(arg0, arg1);
 }
 
-function __wbg_adapter_17(arg0, arg1, arg2) {
+function __wbg_adapter_13(arg0, arg1, arg2) {
     _assertNum(arg0);
     _assertNum(arg1);
     wasm.closure1034_externref_shim(arg0, arg1, arg2);
@@ -1482,12 +1482,12 @@ function __wbg_get_imports() {
     }, arguments) };
     imports.wbg.__wbindgen_cast_9fd38a965a65c380 = function() { return logError(function (arg0, arg1) {
         // Cast intrinsic for `Closure(Closure { dtor_idx: 1033, function: Function { arguments: [Externref], shim_idx: 1034, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-        const ret = makeMutClosure(arg0, arg1, 1033, __wbg_adapter_17);
+        const ret = makeMutClosure(arg0, arg1, 1033, __wbg_adapter_13);
         return ret;
     }, arguments) };
     imports.wbg.__wbindgen_cast_a76d1c4fbc72b629 = function() { return logError(function (arg0, arg1) {
         // Cast intrinsic for `Closure(Closure { dtor_idx: 877, function: Function { arguments: [], shim_idx: 878, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-        const ret = makeMutClosure(arg0, arg1, 877, __wbg_adapter_14);
+        const ret = makeMutClosure(arg0, arg1, 877, __wbg_adapter_8);
         return ret;
     }, arguments) };
     imports.wbg.__wbindgen_cast_cb9088102bce6b30 = function() { return logError(function (arg0, arg1) {

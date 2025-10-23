@@ -303,6 +303,7 @@
 
         async function runP2PK2of2Test(mint, testId, timestamp) {
             const testName = 'P2PK 2-of-2 Multisig';
+            const expectedSteps = 3;
             console.log(`Starting test: ${testName}`);
 
             // Step 0: Get mint denominations
@@ -317,7 +318,7 @@
             if (balance < 3) {
                 console.error('Insufficient balance for test');
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 1, stepName: 'Swap tokens for P2PK',
                     expected: 'Success', actual: 'Insufficient balance',
                     state: 'Failed',
@@ -381,6 +382,7 @@
                     testName,
                     mintUrl: mint.url,
                     timestamp,
+                    expectedSteps,
                     stepNumber: 1,
                     stepName: 'Swap tokens for P2PK',
                     expected: 'Success',
@@ -392,7 +394,7 @@
             } catch (err) {
                 console.error('Failed to swap for P2PK tokens:', err);
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 1, stepName: 'Swap tokens for P2PK',
                     expected: 'Success', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
@@ -453,7 +455,7 @@
                 }
             } catch (err) {
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 2, stepName: 'Sign with Alice only',
                     expected: 'Reject', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
@@ -461,13 +463,13 @@
                 await loadAndRenderResults();
                 // Skip remaining
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 3, stepName: 'Sign with Bob only',
                     expected: 'Reject', actual: 'Skipped', state: 'Skipped'
                 });
                 await loadAndRenderResults();
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 4, stepName: 'Sign with both Alice and Bob',
                     expected: 'Accept', actual: 'Skipped', state: 'Skipped'
                 });
@@ -510,7 +512,7 @@
                 }
             } catch (err) {
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 3, stepName: 'Sign with Bob only',
                     expected: 'Reject', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
@@ -518,7 +520,7 @@
                 await loadAndRenderResults();
                 // Skip remaining
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 4, stepName: 'Sign with both Alice and Bob',
                     expected: 'Accept', actual: 'Skipped', state: 'Skipped'
                 });
@@ -568,7 +570,7 @@
                 }
             } catch (err) {
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 4, stepName: 'Sign with both Alice and Bob',
                     expected: 'Accept', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
@@ -579,6 +581,7 @@
 
         async function runP2PK2of2IndividualTest(mint, testId, timestamp) {
             const testName = 'P2PK 2-of-2 Multisig - individual proofs';
+            const expectedSteps = 3;
             console.log(`Starting test: ${testName}`);
 
             // Step 0: Get mint denominations
@@ -593,7 +596,7 @@
             if (balance < 3) {
                 console.error('Insufficient balance for test');
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 1, stepName: 'Swap tokens for P2PK',
                     expected: 'Success', actual: 'Insufficient balance',
                     state: 'Failed',
@@ -650,7 +653,7 @@
                 console.log('Swapped to P2PK proofs:', proofs);
 
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 1, stepName: 'Swap tokens for P2PK',
                     expected: 'Success', actual: 'Success', state: 'Passed',
                     details: 'Swapped for 2 P2PK 2-of-2 tokens (1, 2 sat)'
@@ -659,7 +662,7 @@
             } catch (err) {
                 console.error('Failed to swap for P2PK tokens:', err);
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 1, stepName: 'Swap tokens for P2PK',
                     expected: 'Success', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
@@ -742,7 +745,7 @@
                 }
             } catch (err) {
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 2, stepName: 'Sign and spend 1 sat proof',
                     expected: 'Accept', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
@@ -750,7 +753,7 @@
                 await loadAndRenderResults();
                 // Skip remaining step
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 3, stepName: 'Sign and spend 2 sat proof',
                     expected: 'Accept', actual: 'Skipped', state: 'Skipped'
                 });
@@ -797,7 +800,7 @@
                 }
             } catch (err) {
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 3, stepName: 'Sign and spend 2 sat proof',
                     expected: 'Accept', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
@@ -808,6 +811,7 @@
 
         async function runP2PK2of2SigAllTest(mint, testId, timestamp) {
             const testName = 'P2PK 2-of-2 Multisig SIGALL';
+            const expectedSteps = 3;
             console.log(`Starting test: ${testName}`);
 
             // Step 0: Get mint denominations
@@ -822,7 +826,7 @@
             if (balance < 3) {
                 console.error('Insufficient balance for test');
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 1, stepName: 'Swap tokens for P2PK',
                     expected: 'Success', actual: 'Insufficient balance',
                     state: 'Failed',
@@ -831,19 +835,19 @@
                 await loadAndRenderResults();
                 // Skip remaining steps
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 2, stepName: 'Spend first proof individually',
                     expected: 'Reject', actual: 'Skipped', state: 'Skipped'
                 });
                 await loadAndRenderResults();
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 3, stepName: 'Spend second proof individually',
                     expected: 'Reject', actual: 'Skipped', state: 'Skipped'
                 });
                 await loadAndRenderResults();
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 4, stepName: 'Spend both proofs together',
                     expected: 'Accept', actual: 'Skipped', state: 'Skipped'
                 });
@@ -958,7 +962,7 @@
                 console.log('P2PK proof states:', states);
 
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 1, stepName: 'Create P2PK 2-of-2 proofs',
                     expected: 'Success', actual: 'Success', state: 'Passed',
                     details: `Created 2 P2PK 2-of-2 tokens with SigAll (1, 2 sat). States: ${states.join(', ')}`
@@ -967,7 +971,7 @@
             } catch (err) {
                 console.error('Failed to create P2PK tokens:', err);
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 1, stepName: 'Create P2PK 2-of-2 proofs',
                     expected: 'Success', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
@@ -975,13 +979,13 @@
                 await loadAndRenderResults();
                 // Skip remaining steps
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 2, stepName: 'Test SigAll with swapped outputs',
                     expected: 'Reject', actual: 'Skipped', state: 'Skipped'
                 });
                 await loadAndRenderResults();
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 3, stepName: 'Spend P2PK proofs with 2-of-2 signatures',
                     expected: 'Accept', actual: 'Skipped', state: 'Skipped'
                 });
@@ -1068,7 +1072,7 @@
             } catch (err) {
                 console.error('  Step 2 error:', err);
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 2, stepName: 'Test SigAll with swapped outputs',
                     expected: 'Reject', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
@@ -1142,7 +1146,7 @@
                 }
 
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 3, stepName: 'Spend P2PK proofs with 2-of-2 signatures',
                     expected: 'Accept', actual: 'Accept', state: 'Passed',
                     details: `Successfully spent P2PK proofs using 2-of-2 multisig with SigAll. First proof had ${numSignatures3} signatures.`
@@ -1151,7 +1155,7 @@
             } catch (err) {
                 console.error('  Step 3 error:', err);
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 3, stepName: 'Spend P2PK proofs with 2-of-2 signatures',
                     expected: 'Accept', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
@@ -1162,6 +1166,7 @@
 
         async function runP2PKLocktimeRefundTest(mint, testId, timestamp) {
             const testName = 'P2PK Locktime + Refund';
+            const expectedSteps = 3;
             console.log(`Starting test: ${testName}`);
 
             // Check wallet balance first
@@ -1171,7 +1176,7 @@
             if (balance < 3) {
                 console.error('Insufficient balance for test');
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 1, stepName: 'Create P2PK tokens with locktime',
                     expected: 'Success', actual: 'Insufficient balance',
                     state: 'Failed',
@@ -1180,7 +1185,7 @@
                 await loadAndRenderResults();
                 // Skip remaining steps
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 2, stepName: 'Sign with A,B,C,D (mixed)',
                     expected: 'Reject', actual: 'Skipped', state: 'Skipped'
                 });
@@ -1317,7 +1322,7 @@
                 console.log('P2PK proof states:', states);
 
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 1, stepName: 'Create P2PK tokens with 2-of-3 multisig',
                     expected: 'Success', actual: 'Success', state: 'Passed',
                     details: `Created 2 P2PK tokens (1, 2 sat) with 2-of-3 multisig. Before locktime ${locktime}: need 2 of (A,B,C). After locktime: need 2 of (D,E,F). States: ${states.join(', ')}`
@@ -1326,7 +1331,7 @@
             } catch (err) {
                 console.error('Failed to create P2PK tokens:', err);
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 1, stepName: 'Create P2PK tokens with locktime',
                     expected: 'Success', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
@@ -1334,13 +1339,13 @@
                 await loadAndRenderResults();
                 // Skip remaining steps
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 2, stepName: 'Try spending with Alice (before locktime)',
                     expected: 'Reject', actual: 'Skipped', state: 'Skipped'
                 });
                 await loadAndRenderResults();
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 3, stepName: 'Spend with Bob (refund key)',
                     expected: 'Accept', actual: 'Skipped', state: 'Skipped'
                 });
@@ -1405,7 +1410,7 @@
             } catch (err) {
                 console.error('  Step 2 error:', err);
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 2, stepName: 'Sign with A,B,C,D (mixed)',
                     expected: 'Reject', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)
@@ -1465,7 +1470,7 @@
                 }
 
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 3, stepName: 'Sign with D,E (valid 2-of-3)',
                     expected: 'Accept', actual: 'Accept', state: 'Passed',
                     details: `Successfully spent with 2 valid post-locktime signatures (D, E from refund set)`
@@ -1474,7 +1479,7 @@
             } catch (err) {
                 console.error('  Step 3 error:', err);
                 await saveTestResult({
-                    testId, testName, mintUrl: mint.url, timestamp,
+                    testId, testName, mintUrl: mint.url, timestamp, expectedSteps,
                     stepNumber: 3, stepName: 'Sign with D,E (valid 2-of-3)',
                     expected: 'Accept', actual: 'Error', state: 'Failed',
                     details: err.message || String(err)

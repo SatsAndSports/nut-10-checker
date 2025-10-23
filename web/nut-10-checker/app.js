@@ -284,6 +284,7 @@ function renderResults(results) {
                 testName: result.testName,
                 mintUrl: result.mintUrl,
                 timestamp: result.timestamp,
+                expectedSteps: result.expectedSteps,
                 steps: []
             };
         }
@@ -301,14 +302,8 @@ function renderResults(results) {
         const hasSkipped = test.steps.some(s => s.state === 'Skipped');
         const allPassed = test.steps.every(s => s.state === 'Passed');
 
-        // Count expected steps based on test name
-        const expectedStepCounts = {
-            'P2PK 2-of-2 Multisig': 3,
-            'P2PK 2-of-2 Multisig - individual proofs': 3,
-            'P2PK 2-of-2 Multisig SIGALL': 3,
-            'P2PK Locktime + Refund': 3
-        };
-        const expectedSteps = expectedStepCounts[test.testName] || test.steps.length;
+        // Get expected steps from test metadata (fallback to steps length for old tests)
+        const expectedSteps = test.expectedSteps || test.steps.length;
         const isComplete = test.steps.length >= expectedSteps;
 
         const overallStatus = hasFailed ? 'failed' :
